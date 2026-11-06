@@ -233,6 +233,7 @@ function viewLogin() {
 function viewPending() {
   return `<div class="card center stack"><h1 class="title">Aguardando liberação</h1>
     <p class="muted">Sua conta foi criada com ${esc(S.user.email)}. A Janaine vai conferir sua assinatura do Trio Playback e liberar o acesso. Assim que ela liberar, o app abre sozinho.</p>
+    ${(S.user.email || "").toLowerCase() === ADMIN_EMAIL ? `<div class="card"><b>Janaine, confirme seu e-mail para abrir o painel</b><p class="small muted" style="margin:0">Toque em enviar, abra o e-mail que chegar, clique no link e volte aqui em Já confirmei.</p><div class="hrow" style="justify-content:center"><button class="btn sm primary" data-a="verify">Enviar e-mail de confirmação</button><button class="btn sm" data-a="verified">Já confirmei</button></div></div>` : ""}
     <div class="hrow" style="justify-content:center"><button class="btn" data-a="logout">Sair</button></div></div>`;
 }
 function viewBlocked() {
@@ -580,7 +581,7 @@ document.addEventListener("click", async e => {
     else if (a === "logout") { await wipeOffline(); await signOut(auth); }
     else if (a === "reset") { const em = $("em").value.trim(); if (!em) return toast("Digite seu e-mail primeiro."); await sendPasswordResetEmail(auth, em); toast("Enviamos um e-mail para criar uma nova senha."); }
     else if (a === "verify") { await sendEmailVerification(S.user); toast("E-mail de confirmação enviado. Abra sua caixa de entrada."); }
-    else if (a === "verified") { await S.user.reload(); await S.user.getIdToken(true); S.isAdmin = S.user.emailVerified && S.user.email.toLowerCase() === ADMIN_EMAIL; if (S.isAdmin) startData(); toast(S.isAdmin ? "Confirmado. O painel está liberado." : "Ainda não aparece como confirmado."); render(); }
+    else if (a === "verified") { await S.user.reload(); await S.user.getIdToken(true); S.isAdmin = S.user.emailVerified && S.user.email.toLowerCase() === ADMIN_EMAIL; if (S.isAdmin) { if (S.profile && S.profile.status !== "active") await updateDoc(doc(db, "users", S.user.uid), { status: "active", activatedAt: serverTimestamp() }); await setDoc(doc(db, "allowed", ADMIN_EMAIL), { addedAt: serverTimestamp() }); startData(); } toast(S.isAdmin ? "Confirmado. O painel está liberado." : "Ainda não aparece como confirmado."); render(); }
     // painel
     else if (a === "adminreload") { S.adminData = null; render(); }
     else if (a === "mkkey") { const k = crypto.getRandomValues(new Uint8Array(32)); await setDoc(doc(db, "config", "offline"), { k: b64.to(k), createdAt: serverTimestamp() }); toast("Modo offline ativado."); S.adminData = null; render(); }
