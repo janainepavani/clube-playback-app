@@ -1,0 +1,7 @@
+[
+  {
+    "origin": ["https://janainepavani.github.io", "https://app.janainepavani.com", "http://localhost:8080"],
+    "method": ["GET"],
+    "maxAgeSeconds": 3600
+  }
+]

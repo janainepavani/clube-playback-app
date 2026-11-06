@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Clube Playback</title>
+<meta name="theme-color" content="#0d0b0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Trio Playback">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Palco escuro, bronze das pinceladas dos vídeos, texto creme. Uma coluna que cresce no tablet e no computador. */
+:root{
+  --ink:#0d0b0a; --surface:#181513; --raised:#221e1b; --line:#3a332d;
+  --cream:#efe6d2; --muted:#a89f90; --bronze:#c49a6c; --bronze-ink:#1a120a;
+  --ok:#8fcf9f; --warn:#e6b85c; --bad:#e48a78;
+  --body:"Montserrat","Avenir Next","Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--ink);color:var(--cream);font-family:var(--body);font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--bronze);outline-offset:2px}
+h1,h2,h3{margin:0;font-weight:700;text-wrap:balance}
+.app{max-width:760px;margin:0 auto;padding:env(safe-area-inset-top) 0 0;min-height:100vh;display:flex;flex-direction:column}
+header.top{padding:16px 18px 8px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+header.top img{height:42px;width:auto}
+.conn{font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}
+.conn.off{color:var(--warn);border-color:var(--warn)}
+main{flex:1;padding:4px 18px calc(170px + env(safe-area-inset-bottom))}
+.muted{color:var(--muted)} .small{font-size:14px}
+.title{font-size:28px;line-height:1.1}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:99px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.pill.brass{border-color:var(--bronze);color:var(--bronze)} .pill.ok{border-color:var(--ok);color:var(--ok)}
+.pill.warn{border-color:var(--warn);color:var(--warn)} .pill.bad{border-color:var(--bad);color:var(--bad)}
+.btn{border:1px solid var(--line);background:var(--raised);border-radius:12px;padding:10px 16px;font-weight:600}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--bronze);color:var(--bronze-ink);border-color:var(--bronze)}
+.btn.ghost{background:transparent} .btn.sm{padding:6px 11px;font-size:14px;border-radius:9px}
+.btn.danger{border-color:var(--bad);color:var(--bad);background:transparent}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.link{background:none;border:none;color:var(--bronze);padding:0;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.field{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--line);background:var(--ink)}
+label{font-size:14px;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.stack{display:flex;flex-direction:column;gap:14px}
+.hrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap} .spread{justify-content:space-between}
+.list{display:flex;flex-direction:column;gap:6px}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;text-align:left;width:100%}
+button.row:hover{border-color:var(--muted)}
+.row .name{flex:1;font-weight:600;min-width:0;overflow-wrap:anywhere}
+.row .meta{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+.row.locked{opacity:.5}
+.letter{color:var(--bronze);font-weight:700;font-size:15px;margin:16px 0 6px}
+.search{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--surface);margin:8px 0 6px}
+.keychip{font-size:24px;font-weight:700;background:var(--raised);border:1px solid var(--bronze);color:var(--bronze);border-radius:12px;padding:3px 14px;min-width:58px;text-align:center}
+.tabs{display:flex;gap:4px;background:var(--raised);border-radius:12px;padding:4px}
+.tabs button{flex:1;border:none;background:none;padding:9px;border-radius:9px;font-weight:600;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:var(--ink);color:var(--cream)}
+.vbox{position:relative;border-radius:12px;overflow:hidden;background:#000}
+.vbox video{width:100%;display:block;background:#000}
+.vbox .wm{position:absolute;right:10px;bottom:44px;font-size:11px;color:#ffffff40;pointer-events:none;user-select:none}
+.vbox.mini{position:sticky;top:8px;z-index:3;width:48%;margin-left:auto;box-shadow:0 8px 24px #000c}
+.vbox.mini .wm{bottom:8px;font-size:9px}
+.empty{aspect-ratio:16/9;border:1px dashed var(--line);border-radius:12px;display:grid;place-items:center;text-align:center;padding:16px;color:var(--muted)}
+.sheet{width:100%;display:block;border-radius:12px;background:#fff}
+.order{font-weight:700;color:var(--bronze);width:26px;text-align:center;font-variant-numeric:tabular-nums}
+.bar{height:6px;background:var(--line);border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--bronze)}
+.note{font-size:14px;color:var(--muted);border-left:3px solid var(--bronze);padding:4px 0 4px 12px}
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:5;background:linear-gradient(transparent,var(--ink) 25%);padding-bottom:env(safe-area-inset-bottom)}
+.dock-in{max-width:760px;margin:0 auto;padding:16px 12px 10px}
+nav.tabsbar{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px}
+nav.tabsbar button{flex:1;background:none;border:none;padding:11px 6px;border-radius:10px;font-weight:600;color:var(--muted)}
+nav.tabsbar button[aria-current="page"]{color:var(--cream);background:var(--raised)}
+.pres{position:fixed;inset:0;z-index:20;background:#060505;display:none;overflow:auto;padding-top:env(safe-area-inset-top)}
+.pres.show{display:block}
+.pres-in{max-width:960px;margin:0 auto;padding:14px 16px 30px;display:flex;flex-direction:column;gap:14px}
+.pres .now{font-size:clamp(28px,7vw,52px);font-weight:700;line-height:1.05}
+.ctl{display:flex;gap:10px;justify-content:center}
+.ctl .btn{flex:1;max-width:220px;padding:14px}
+.toast{position:fixed;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);background:var(--raised);border:1px solid var(--bronze);padding:10px 16px;border-radius:12px;z-index:40;font-weight:600;opacity:0;transition:opacity .25s;pointer-events:none;max-width:90vw;text-align:center}
+.toast.show{opacity:1}
+.center{text-align:center;padding:40px 6px}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <img src="logo.png" alt="Trio Playback by Janaine Pavani">
+    <span class="conn" id="conn">Online</span>
+  </header>
+  <main id="main"><div class="center muted">Abrindo o app...</div></main>
+</div>
+<div class="dock" id="dock" hidden>
+  <div class="dock-in">
+    <nav class="tabsbar" id="nav">
+      <button data-a="nav" data-v="catalog">Músicas</button>
+      <button data-a="nav" data-v="playlists">Playlists</button>
+      <button data-a="nav" data-v="account">Conta</button>
+    </nav>
+  </div>
+</div>
+<div class="pres" id="pres"><div class="pres-in" id="presIn"></div></div>
+<div class="toast" id="toast"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

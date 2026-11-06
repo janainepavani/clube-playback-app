@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'janaine@janainepavani.com'
+        && request.auth.token.email_verified == true;
+    }
+    function isActive() {
+      return request.auth != null
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    // Vídeos, letras e partituras: só assinante ativa lê, só a Janaine envia
+    match /songs/{allPaths=**} {
+      allow read: if isAdmin() || isActive();
+      allow write: if isAdmin();
+    }
+  }
+}

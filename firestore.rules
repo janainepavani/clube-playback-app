@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email == 'janaine@janainepavani.com'
+        && request.auth.token.email_verified == true;
+    }
+    function isAllowed() {
+      return exists(/databases/$(database)/documents/allowed/$(myEmail()));
+    }
+    function isActive() {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    // Lista de e-mails autorizados (assinantes do Trio)
+    match /allowed/{email} {
+      allow read: if isAdmin() || (signedIn() && email == myEmail());
+      allow write: if isAdmin();
+    }
+
+    // Conta de cada assinante
+    match /users/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+
+      // Criar a própria conta: entra como pendente, ou ativa se o e-mail estiver autorizado
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.email == myEmail()
+        && (request.resource.data.status == 'pending'
+            || (request.resource.data.status == 'active' && isAllowed()));
+
+      allow update: if isAdmin()
+        // a assinante só mexe nas próprias preferências
+        || (signedIn() && request.auth.uid == uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['prefKeys', 'lastSeen']))
+        // pendente que já foi autorizada pela lista passa a ativa sozinha
+        || (signedIn() && request.auth.uid == uid
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'active'
+            && isAllowed()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'activatedAt']));
+
+      allow delete: if isAdmin();
+
+      match /playlists/{pid} {
+        allow read, write: if signedIn() && request.auth.uid == uid && isActive();
+      }
+    }
+
+    // Catálogo
+    match /songs/{id} {
+      allow read: if isActive() || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Chave do modo offline
+    match /config/{doc} {
+      allow read: if isActive() || isAdmin();
+      allow write: if isAdmin();
+    }
+  }
+}
