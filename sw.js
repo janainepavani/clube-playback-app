@@ -1,10 +1,10 @@
 // Guarda o "esqueleto" do app para ele abrir sem internet.
 // Vídeos, letras e partituras ficam no armazenamento criptografado do app, não aqui.
-const CACHE = "clube-app-v1";
+const CACHE = "clube-app-v2";
 const SDK = "https://www.gstatic.com/firebasejs/10.14.1/";
 const SHELL = [
   "./", "./index.html", "./app.js", "./firebase-config.js", "./manifest.webmanifest",
-  "./logo.png", "./icon-192.png", "./icon-512.png",
+  "./logo.png", "./pdf.min.js", "./pdf.worker.min.js", "./icon-192.png", "./icon-512.png",
   SDK + "firebase-app.js", SDK + "firebase-auth.js", SDK + "firebase-firestore.js", SDK + "firebase-storage.js"
 ];
 
