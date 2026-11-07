@@ -15,6 +15,11 @@ import {
 import { firebaseConfig } from "./firebase-config.js";
 
 const ADMIN_EMAIL = "janaine@janainepavani.com";
+const CLUB_URL = "https://www.janainepavani.com/clubeplayback";
+const WHATS = "5541998771712";
+const CONTACT = `<div class="card small" style="gap:6px">
+  <b>Já é assinante do Trio Playback e não consegue entrar?</b>
+  <span class="muted">Fale com a Janaine Pavani pelo WhatsApp <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">(41) 99877-1712</a> ou pelo e-mail <a href="mailto:janaine@janainepavani.com">janaine@janainepavani.com</a>.</span></div>`;
 const OFFLINE_AFTER_DAYS = 7;   // offline libera depois do prazo de reembolso
 const CHECK_EVERY_DAYS = 7;     // precisa se conectar a cada 7 dias
 
@@ -171,6 +176,21 @@ function startData() {
   const ok = S.isAdmin || (S.profile && S.profile.status === "active");
   if (!ok || dataStarted) return;
   dataStarted = true;
+  if (S.isAdmin) {
+    let first = true, known = new Set();
+    unsub.push(onSnapshot(query(collection(db, "users"), where("status", "==", "pending")), s => {
+      const list = s.docs.map(d => ({ uid: d.id, ...d.data() }));
+      const fresh = list.filter(u => !known.has(u.uid));
+      known = new Set(list.map(u => u.uid));
+      S.pendingCount = list.length;
+      if (!first && fresh.length) {
+        toast(fresh.length === 1 ? "Nova solicitação de acesso: " + fresh[0].email : fresh.length + " novas solicitações de acesso");
+        try { if ("Notification" in window && Notification.permission === "granted") new Notification("Trio Playback", { body: "Nova solicitação de acesso: " + fresh.map(u => u.email).join(", "), icon: "icon-192.png" }); } catch (e) {}
+        if (S.view === "admin") S.adminData = null;
+      }
+      first = false; render();
+    }, e => console.warn(e)));
+  }
   unsub.push(onSnapshot(query(collection(db, "songs"), orderBy("name")), s => {
     S.songs = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => norm(a.name).localeCompare(norm(b.name)));
     render();
@@ -219,6 +239,8 @@ function render() {
   const st = S.profile && S.profile.status;
   const inApp = S.user && (S.isAdmin || st === "active") && !(!navigator.onLine && checkExpired());
   $("dock").hidden = !inApp || S.view === "admin";
+  const contaBtn = document.querySelector('#nav button[data-v="account"]');
+  if (contaBtn) contaBtn.innerHTML = "Conta" + (S.isAdmin && S.pendingCount ? ` <span class="pill warn" style="margin-left:4px">${S.pendingCount}</span>` : "");
   document.querySelectorAll("#nav button").forEach(b => b.setAttribute("aria-current", (b.dataset.v === S.view || (S.view === "song" && b.dataset.v === "catalog") || (S.view === "playlist" && b.dataset.v === "playlists")) ? "page" : "false"));
   if (!S.user) return paint(viewLogin());
   if (!S.profile && !S.isAdmin) return paint(`<div class="center muted">Carregando sua conta...</div>`);
@@ -241,25 +263,36 @@ function paint(html) {
 }
 
 function viewLogin() {
-  return `<form class="card" id="loginForm" style="margin-top:24px">
-    <h1 class="title">Entre no Trio Playback</h1>
+  return `<div class="stack" style="margin-top:16px">
+  <div class="card" style="border-color:var(--bronze)">
+    <b>App exclusivo para assinantes do Trio Playback</b>
+    <p class="small muted" style="margin:0">Aqui você encontra os vídeos de karaokê, as letras e as partituras do Trio Playback, monta suas playlists e toca no show, inclusive sem internet. O acesso é liberado só para quem assina o Trio Playback.</p>
+    <a class="btn" style="text-align:center;text-decoration:none" href="${CLUB_URL}" target="_blank" rel="noopener">Conhecer o Trio Playback e assinar</a>
+  </div>
+  <form class="card" id="loginForm">
+    <h1 class="title">Entre no app</h1>
     <p class="muted small" style="margin:0">Use o mesmo e-mail da sua assinatura do Trio Playback.</p>
     <label for="em">E-mail</label><input class="field" id="em" type="email" autocomplete="email" required>
     <label for="pw">Senha</label><input class="field" id="pw" type="password" autocomplete="current-password" minlength="6" required>
     <button class="btn primary" type="submit" data-mode="in">Entrar</button>
     <button class="btn" type="submit" data-mode="up">Primeiro acesso: criar minha senha</button>
     <button class="link" type="button" data-a="reset">Esqueci minha senha</button>
-  </form>`;
+  </form>
+  ${CONTACT}
+  </div>`;
 }
 function viewPending() {
   return `<div class="card center stack"><h1 class="title">Aguardando liberação</h1>
     <p class="muted">Sua conta foi criada com ${esc(S.user.email)}. A Janaine vai conferir sua assinatura do Trio Playback e liberar o acesso. Assim que ela liberar, o app abre sozinho.</p>
     ${(S.user.email || "").toLowerCase() === ADMIN_EMAIL ? `<div class="card"><b>Janaine, confirme seu e-mail para abrir o painel</b><p class="small muted" style="margin:0">Toque em enviar, abra o e-mail que chegar, clique no link e volte aqui em Já confirmei.</p><div class="hrow" style="justify-content:center"><button class="btn sm primary" data-a="verify">Enviar e-mail de confirmação</button><button class="btn sm" data-a="verified">Já confirmei</button></div></div>` : ""}
+    <p class="small muted" style="margin:0">Se demorar, fale com a Janaine pelo WhatsApp <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">(41) 99877-1712</a>.</p>
     <div class="hrow" style="justify-content:center"><button class="btn" data-a="logout">Sair</button></div></div>`;
 }
 function viewBlocked() {
   return `<div class="card center stack"><h1 class="title">Acesso encerrado</h1>
     <p class="muted">Não encontramos uma assinatura ativa do Trio Playback para ${esc(S.user.email)}. As músicas salvas neste aparelho foram apagadas. Se você assinou de novo, fale com a Janaine.</p>
+    <a class="btn primary" style="text-decoration:none" href="${CLUB_URL}" target="_blank" rel="noopener">Assinar o Trio Playback</a>
+    ${CONTACT}
     <div class="hrow" style="justify-content:center"><button class="btn" data-a="logout">Sair</button></div></div>`;
 }
 function viewExpired() {
@@ -418,7 +451,8 @@ function viewAccount() {
       <p class="small muted" style="margin:0">${S.saved.size} ${S.saved.size === 1 ? "tom salvo" : "tons salvos"} neste aparelho.</p>
       <div class="hrow">${S.saved.size ? `<button class="btn sm" data-a="wipe">Apagar tudo do aparelho</button>` : ""}<button class="btn sm" data-a="logout">Sair</button></div>
     </div>
-    ${(S.user.email || "").toLowerCase() === ADMIN_EMAIL ? (S.isAdmin ? `<button class="btn primary" data-a="nav" data-v="admin">Abrir o Painel da Janaine</button>`
+    ${(S.user.email || "").toLowerCase() === ADMIN_EMAIL ? (S.isAdmin ? `<button class="btn primary" data-a="nav" data-v="admin">Abrir o Painel da Janaine${S.pendingCount ? "  ·  " + S.pendingCount + (S.pendingCount === 1 ? " pedido novo" : " pedidos novos") : ""}</button>
+      ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn sm" data-a="notif">Receber aviso no aparelho quando chegar pedido</button>` : ""}`
       : `<div class="card"><b>Confirme seu e-mail para abrir o painel</b><p class="small muted" style="margin:0">Por segurança, o painel só abre depois que você confirma o e-mail ${ADMIN_EMAIL}.</p>
         <div class="hrow"><button class="btn sm" data-a="verify">Enviar e-mail de confirmação</button><button class="btn sm" data-a="verified">Já confirmei</button></div></div>`) : ""}
   </div>`;
@@ -667,6 +701,7 @@ document.addEventListener("click", async e => {
     else if (a === "verify") { await sendEmailVerification(S.user); toast("E-mail de confirmação enviado. Abra sua caixa de entrada."); }
     else if (a === "verified") { await S.user.reload(); await S.user.getIdToken(true); S.isAdmin = S.user.emailVerified && S.user.email.toLowerCase() === ADMIN_EMAIL; if (S.isAdmin) { if (S.profile && S.profile.status !== "active") await updateDoc(doc(db, "users", S.user.uid), { status: "active", activatedAt: serverTimestamp() }); await setDoc(doc(db, "allowed", ADMIN_EMAIL), { addedAt: serverTimestamp() }); startData(); } toast(S.isAdmin ? "Confirmado. O painel está liberado." : "Ainda não aparece como confirmado."); render(); }
     // painel
+    else if (a === "notif") { const r = await Notification.requestPermission(); toast(r === "granted" ? "Pronto. Com o app aberto ou em segundo plano, você recebe o aviso." : "Os avisos não foram autorizados neste aparelho."); render(); }
     else if (a === "adminreload") { S.adminData = null; render(); }
     else if (a === "mkkey") { const k = crypto.getRandomValues(new Uint8Array(32)); await setDoc(doc(db, "config", "offline"), { k: b64.to(k), createdAt: serverTimestamp() }); toast("Modo offline ativado."); S.adminData = null; render(); }
     else if (a === "approve") { const em = el.dataset.em; await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); await updateDoc(doc(db, "users", el.dataset.uid), { status: "active", activatedAt: serverTimestamp() }); toast("Acesso liberado para " + em + "."); S.adminData = null; render(); }
