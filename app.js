@@ -16,10 +16,10 @@ import { firebaseConfig } from "./firebase-config.js";
 
 const ADMIN_EMAIL = "janaine@janainepavani.com";
 const CLUB_URL = "https://www.janainepavani.com/clubeplayback";
-const WHATS = "5541998771712";
+const WHATS = "5541998771712?text=" + encodeURIComponent("Olá, Janaine! Sou assinante do Trio Playback e preciso de ajuda para entrar no app.");
 const CONTACT = `<div class="card small" style="gap:6px">
   <b>Já é assinante do Trio Playback e não consegue entrar?</b>
-  <span class="muted">Fale com a Janaine Pavani pelo WhatsApp <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">(41) 99877-1712</a> ou pelo e-mail <a href="mailto:janaine@janainepavani.com">janaine@janainepavani.com</a>.</span></div>`;
+  <span class="muted">Fale com a Janaine pelo <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">WhatsApp de Janaine Pavani</a> ou pelo e-mail <a href="mailto:janaine@janainepavani.com">janaine@janainepavani.com</a>.</span></div>`;
 const OFFLINE_AFTER_DAYS = 7;   // offline libera depois do prazo de reembolso
 const CHECK_EVERY_DAYS = 7;     // precisa se conectar a cada 7 dias
 
@@ -285,7 +285,7 @@ function viewPending() {
   return `<div class="card center stack"><h1 class="title">Aguardando liberação</h1>
     <p class="muted">Sua conta foi criada com ${esc(S.user.email)}. A Janaine vai conferir sua assinatura do Trio Playback e liberar o acesso. Assim que ela liberar, o app abre sozinho.</p>
     ${(S.user.email || "").toLowerCase() === ADMIN_EMAIL ? `<div class="card"><b>Janaine, confirme seu e-mail para abrir o painel</b><p class="small muted" style="margin:0">Toque em enviar, abra o e-mail que chegar, clique no link e volte aqui em Já confirmei.</p><div class="hrow" style="justify-content:center"><button class="btn sm primary" data-a="verify">Enviar e-mail de confirmação</button><button class="btn sm" data-a="verified">Já confirmei</button></div></div>` : ""}
-    <p class="small muted" style="margin:0">Se demorar, fale com a Janaine pelo WhatsApp <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">(41) 99877-1712</a>.</p>
+    <p class="small muted" style="margin:0">Se demorar, fale com a Janaine pelo <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">WhatsApp de Janaine Pavani</a>.</p>
     <div class="hrow" style="justify-content:center"><button class="btn" data-a="logout">Sair</button></div></div>`;
 }
 function viewBlocked() {
