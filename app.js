@@ -266,7 +266,7 @@ function viewLogin() {
   return `<div class="stack" style="margin-top:16px">
   <div class="card" style="border-color:var(--bronze)">
     <b>App exclusivo para assinantes do Trio Playback</b>
-    <p class="small muted" style="margin:0">Aqui você encontra os vídeos de karaokê, as letras e as partituras do Trio Playback, monta suas playlists e toca no show, inclusive sem internet. O acesso é liberado só para quem assina o Trio Playback.</p>
+    <p class="small muted" style="margin:0">Aqui você encontra os vídeos com letra (lyric videos), as letras e as partituras do Trio Playback, monta suas playlists e toca no show, inclusive sem internet. O acesso é liberado só para quem assina o Trio Playback.</p>
     <a class="btn" style="text-align:center;text-decoration:none" href="${CLUB_URL}" target="_blank" rel="noopener">Conhecer o Trio Playback e assinar</a>
   </div>
   <form class="card" id="loginForm">

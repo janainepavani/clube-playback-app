@@ -1,6 +1,6 @@
 # App Trio Playback (Clube Playback)
 
-Web app instalável (PWA) para assinantes do Trio Playback: vídeo de karaokê, letra e partitura por tom, playlists, modo apresentação e uso sem internet.
+Web app instalável (PWA) para assinantes do Trio Playback: vídeo com letra (lyric video), letra e partitura por tom, playlists, modo apresentação e uso sem internet.
 
 ## Como funciona
 - **Login:** e-mail e senha (Firebase Authentication). Primeiro acesso cria a senha.
