@@ -539,35 +539,64 @@ async function submitSong() {
 }
 
 /* ---------------- modo apresentação ---------------- */
-let presOpen = false, presIdx = 0, presReorder = false, presLyrics = false, presReady = false;
+let presOpen = false, presIdx = 0, presReorder = false, presReady = false;
+let presView = "video", presSheet = 0, presLocked = true, presKeys = false;
 const pres = $("pres"), presIn = $("presIn");
-function openPres() { presOpen = true; presIdx = 0; presReorder = false; presReady = false; pres.classList.add("show"); document.body.style.overflow = "hidden"; renderPres(); }
-function closePres() { presOpen = false; const v = presIn.querySelector("video"); if (v) v.pause(); pres.classList.remove("show"); presIn.innerHTML = ""; document.body.style.overflow = ""; presMounted = null; render(); }
-let presMounted = null;
+function openPres() { presOpen = true; presIdx = 0; presReorder = false; presReady = false; presView = "video"; presSheet = 0; presLocked = true; presKeys = false; pres.classList.add("show"); document.body.style.overflow = "hidden"; renderPres(); }
+function closePres() { presOpen = false; const v = presIn.querySelector("video"); if (v) v.pause(); pres.classList.remove("show"); presIn.innerHTML = ""; document.body.style.overflow = ""; presMounted = null; presDocKey = null; render(); }
+let presMounted = null, presDocKey = null;
 function renderPres() {
   const p = getPl(S.plId); if (!p) return closePres();
   const items = (p.items || []).filter(byId); if (!items.length) return closePres();
   presIdx = Math.min(presIdx, items.length - 1);
-  const s = byId(items[presIdx]); const k = keyOf(s);
+  const s = byId(items[presIdx]); const k = keyOf(s); const kd = keyData(s, k);
+  const sheets = sheetsOf(kd); presSheet = Math.min(presSheet, Math.max(0, sheets.length - 1));
   const next = items.slice(presIdx + 1, presIdx + 4);
   const keepV = presIn.querySelector("#pv");
+  const keepD = presIn.querySelector("#pdoc");
+  const L = presLocked;
   presIn.innerHTML = `
-    <div class="hrow spread"><span class="small muted">${esc(p.name)}  ·  música ${presIdx + 1} de ${items.length}</span><button class="btn sm" data-a="closepres">Sair</button></div>
-    <div><div class="now">${esc(s.name)}</div><div class="hrow" style="margin-top:8px"><span class="keychip">${esc(k)}</span>${s.bpm ? `<span class="muted">BPM ${esc(s.bpm)}</span>` : ""}${presReady ? `<span class="pill ok">Pronta. Toque quando quiser.</span>` : ""}</div></div>
+    <div class="hrow spread"><span class="small muted">${esc(p.name)}  ·  música ${presIdx + 1} de ${items.length}</span>
+      <span class="hrow">${L ? "" : `<button class="btn sm" data-a="closepres">Sair</button>`}<button class="btn sm ${L ? "" : "primary"}" data-a="plock">${L ? "Destravar" : "Travar"}</button></span></div>
+    ${L ? `<p class="small muted" style="margin:0">Tela travada: dá para tocar, trocar de música e ver letra ou partitura. Para sair, mudar o tom ou a ordem, toque em Destravar.</p>` : ""}
+    <div><div class="now">${esc(s.name)}</div><div class="hrow" style="margin-top:8px"><span class="keychip">${esc(k)}</span>${s.bpm ? `<span class="muted">BPM ${esc(s.bpm)}</span>` : ""}
+      ${!L && s.keys.length > 1 ? `<button class="link" data-a="pkeys">${presKeys ? "Fechar" : "Trocar tom"}</button>` : ""}${presReady ? `<span class="pill ok">Pronta. Toque quando quiser.</span>` : ""}</div>
+      ${!L && presKeys ? `<div class="hrow" style="margin-top:8px">${s.keys.map(x => `<button class="btn sm ${x.key === k ? "primary" : ""}" data-a="pkey" data-k="${esc(x.key)}">${esc(x.key)}</button>`).join("")}</div>` : ""}</div>
+    <div class="tabs" role="tablist">${[["video", "Vídeo"], ["letra", "Letra"], ["partitura", "Partitura"]].map(([v, l]) => `<button role="tab" aria-selected="${presView === v}" data-a="pview" data-v="${v}">${l}</button>`).join("")}</div>
     <div id="pvslot"></div>
+    ${presView === "partitura" && sheets.length > 1 ? `<div class="hrow">${sheets.map((x, i) => `<button class="btn sm ${i === presSheet ? "primary" : ""}" data-a="psheet" data-i="${i}">${esc(x.label || "Partitura " + (i + 1))}</button>`).join("")}</div>` : ""}
+    <div id="pdocslot"></div>
     <div class="ctl"><button class="btn" data-a="pgo" data-d="-1" ${presIdx === 0 ? "disabled" : ""}>Anterior</button><button class="btn primary" data-a="pgo" data-d="1" ${presIdx === items.length - 1 ? "disabled" : ""}>Próxima</button></div>
-    <div class="hrow"><button class="btn sm ghost" data-a="plyr">${presLyrics ? "Esconder letra" : "Mostrar letra"}</button><button class="btn sm ghost" data-a="pre">${presReorder ? "Concluir ordem" : "Reordenar a playlist"}</button></div>
-    <div id="plyrslot"></div>
-    <div><div class="small muted" style="margin-bottom:6px">${presReorder ? "Toque em Subir ou Descer. A música atual não muda." : "A seguir"}</div>
-      <div class="list">${presReorder
+    ${L ? "" : `<div class="hrow"><button class="btn sm ghost" data-a="pre">${presReorder ? "Concluir ordem" : "Reordenar a playlist"}</button></div>`}
+    <div><div class="small muted" style="margin-bottom:6px">${presReorder && !L ? "Toque em Subir ou Descer. A música atual não muda." : "A seguir"}</div>
+      <div class="list">${presReorder && !L
         ? items.map((x, i) => `<div class="row" ${i === presIdx ? 'style="border-color:var(--bronze)"' : ""}><span class="order">${i + 1}</span><span class="name">${esc(byId(x).name)}</span><span class="meta"><button class="btn sm ghost" data-a="pmv" data-i="${i}" data-d="-1" ${i === 0 ? "disabled" : ""}>Subir</button><button class="btn sm ghost" data-a="pmv" data-i="${i}" data-d="1" ${i === items.length - 1 ? "disabled" : ""}>Descer</button></span></div>`).join("")
-        : (next.length ? next.map((x, i) => `<button class="row ${available(x) ? "" : "locked"}" data-a="pjump" data-i="${presIdx + 1 + i}"><span class="order">${presIdx + 2 + i}</span><span class="name">${esc(byId(x).name)}</span><span class="pill brass">${esc(keyOf(byId(x)))}</span></button>`).join("") : `<p class="muted">Esta é a última música.</p>`)}</div></div>`;
+        : (next.length ? next.map((x, i) => `<${L ? "div" : "button"} class="row ${available(x) ? "" : "locked"}" ${L ? "" : `data-a="pjump" data-i="${presIdx + 1 + i}"`}><span class="order">${presIdx + 2 + i}</span><span class="name">${esc(byId(x).name)}</span><span class="pill brass">${esc(keyOf(byId(x)))}</span></${L ? "div" : "button"}>`).join("") : `<p class="muted">Esta é a última música.</p>`)}</div></div>`;
   const slot = $("pvslot");
   const want = s.id + "|" + k;
   if (keepV && presMounted === want) slot.replaceWith(keepV);
   else { const box = document.createElement("div"); box.id = "pv"; box.className = "vbox"; box.innerHTML = `<div class="empty">Carregando o vídeo...</div>`; slot.replaceWith(box); presMounted = want; loadPresVideo(s, k, box, want); }
-  if (presLyrics && s.letra) {
-    fileBlob(s.letra, S.saved.has(want) ? s.id + "|letra" : null).then(b => { const el = $("plyrslot"); if (el && b) showDoc(el, b, s.letra, "Letra de " + s.name); }).catch(() => {});
+  $("pv").classList.toggle("mini", presView !== "video");
+  // letra ou partitura, sem parar o vídeo
+  const dslot = $("pdocslot");
+  if (presView === "video") { presDocKey = null; }
+  else {
+    const path = presView === "letra" ? s.letra : (sheets[presSheet] && sheets[presSheet].path);
+    const oid = presView === "letra" ? s.id + "|letra" : want + "|sheet|" + presSheet;
+    const dk = presView + "|" + oid;
+    if (keepD && presDocKey === dk) dslot.replaceWith(keepD);
+    else {
+      const box = document.createElement("div"); box.id = "pdoc"; dslot.replaceWith(box); presDocKey = dk;
+      if (!path) box.innerHTML = `<div class="empty">${presView === "letra" ? "Letra" : "Partitura"} ainda não disponível para esta música.</div>`;
+      else {
+        box.innerHTML = `<div class="empty">Abrindo...</div>`;
+        fileBlob(path, S.saved.has(want) ? oid : null).then(b => {
+          if (presDocKey !== dk || !$("pdoc")) return;
+          if (b) showDoc($("pdoc"), b, path, (presView === "letra" ? "Letra" : "Partitura") + " de " + s.name);
+          else $("pdoc").innerHTML = `<div class="empty">Sem internet, e isto não está salvo no aparelho.</div>`;
+        }).catch(() => { if ($("pdoc")) $("pdoc").innerHTML = `<div class="empty">Não consegui abrir agora.</div>`; });
+      }
+    }
   }
   const n = items[presIdx + 1]; // pré-carrega a próxima
   if (n) { const ns = byId(n), nk = keyOf(ns), nkd = keyData(ns, nk); fileBlob(nkd.video, S.saved.has(n + "|" + nk) ? n + "|" + nk + "|video" : null).catch(() => {}); }
@@ -606,10 +635,14 @@ document.addEventListener("click", async e => {
     else if (a === "savepl") { const p = getPl(S.plId); for (const id of (p.items || []).filter(byId)) { const s = byId(id); await saveSong(s, keyOf(s)); } toast("Playlist salva no aparelho."); }
     else if (a === "present") openPres();
     else if (a === "closepres") closePres();
-    else if (a === "pgo") { presIdx += +el.dataset.d; presReady = false; renderPres(); }
+    else if (a === "pgo") { presIdx += +el.dataset.d; presReady = false; presSheet = 0; presKeys = false; renderPres(); }
     else if (a === "pjump") { presIdx = +el.dataset.i; presReady = false; renderPres(); }
     else if (a === "pre") { presReorder = !presReorder; renderPres(); }
-    else if (a === "plyr") { presLyrics = !presLyrics; renderPres(); }
+    else if (a === "plock") { presLocked = !presLocked; if (presLocked) { presReorder = false; presKeys = false; } renderPres(); }
+    else if (a === "pview") { presView = el.dataset.v; renderPres(); }
+    else if (a === "psheet") { presSheet = +el.dataset.i; renderPres(); }
+    else if (a === "pkeys") { presKeys = !presKeys; renderPres(); }
+    else if (a === "pkey") { const p = getPl(S.plId); const s = byId((p.items || []).filter(byId)[presIdx]); S.profile.prefKeys = { ...(S.profile.prefKeys || {}), [s.id]: el.dataset.k }; presKeys = false; presSheet = 0; renderPres(); updateDoc(doc(db, "users", S.user.uid), { prefKeys: S.profile.prefKeys }).catch(() => {}); }
     else if (a === "pmv") { const p = getPl(S.plId); const it = (p.items || []).filter(byId); const cur = it[presIdx]; const i = +el.dataset.i, j = i + +el.dataset.d; [it[i], it[j]] = [it[j], it[i]]; presIdx = it.indexOf(cur); p.items = it; renderPres(); await savePlItems(p, it); }
     else if (a === "wipe") { await wipeOffline("Tudo apagado deste aparelho."); render(); }
     else if (a === "logout") { await wipeOffline(); await signOut(auth); }
