@@ -20,7 +20,6 @@ const WHATS = "5541998771712?text=" + encodeURIComponent("Olá, Janaine! Sou ass
 const CONTACT = `<div class="card small" style="gap:6px">
   <b>Já é assinante do Trio Playback e não consegue entrar?</b>
   <span class="muted">Fale com a Janaine pelo <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">WhatsApp de Janaine Pavani</a> ou pelo e-mail <a href="mailto:janaine@janainepavani.com">janaine@janainepavani.com</a>.</span></div>`;
-const OFFLINE_AFTER_DAYS = 7;   // offline libera depois do prazo de reembolso
 const CHECK_EVERY_DAYS = 7;     // precisa se conectar a cada 7 dias
 
 const app = initializeApp(firebaseConfig);
@@ -104,7 +103,7 @@ async function loadFile(id) {
 const lastCheck = () => +(ls.get("cp-check") || 0);
 const activatedAt = () => { const t = S.profile && S.profile.activatedAt; return t && t.toMillis ? t.toMillis() : (t ? +t : Date.now()); };
 const daysActive = () => Math.floor((Date.now() - activatedAt()) / DAY);
-const canOffline = () => S.isAdmin || (S.profile && S.profile.status === "active" && (S.profile.offlineNow || daysActive() >= OFFLINE_AFTER_DAYS));
+const canOffline = () => S.isAdmin || (S.profile && S.profile.status === "active" && true);
 const checkExpired = () => !S.isAdmin && Date.now() - lastCheck() > CHECK_EVERY_DAYS * DAY;
 function available(songId) {
   if (navigator.onLine) return true;
@@ -343,8 +342,8 @@ function viewSong() {
     </div>
     <div class="card">
       <div class="hrow spread"><b>Usar sem internet</b>
-        ${canOffline() ? (off ? `<button class="btn sm" data-a="unsave" data-id="${s.id}">Remover do aparelho</button>` : `<button class="btn sm primary" data-a="save" data-id="${s.id}" ${busy !== undefined || !navigator.onLine ? "disabled" : ""}>${busy !== undefined ? "Salvando " + Math.round(busy * 100) + "%" : "Salvar no aparelho"}</button>`) : `<span class="pill warn">Libera no ${OFFLINE_AFTER_DAYS + 1}º dia</span>`}</div>
-      <p class="small muted" style="margin:0">${canOffline() ? "Vídeo, letra e partitura do tom " + esc(k) + " ficam guardados dentro do app, sem ir para a galeria." : "Faltam " + Math.max(1, OFFLINE_AFTER_DAYS - daysActive()) + " dias para liberar o modo offline. Até lá, tudo funciona com internet."}</p>
+        ${canOffline() ? (off ? `<button class="btn sm" data-a="unsave" data-id="${s.id}">Remover do aparelho</button>` : `<button class="btn sm primary" data-a="save" data-id="${s.id}" ${busy !== undefined || !navigator.onLine ? "disabled" : ""}>${busy !== undefined ? "Salvando " + Math.round(busy * 100) + "%" : "Salvar no aparelho"}</button>`) : ""}</div>
+      <p class="small muted" style="margin:0">${canOffline() ? "Vídeo, letra e partitura do tom " + esc(k) + " ficam guardados dentro do app, sem ir para a galeria." : ""}</p>
     </div>
   </div>`;
 }
@@ -449,7 +448,7 @@ function viewAccount() {
     <div class="card">
       <div class="hrow spread"><b>Trio Playback</b><span class="pill ok">${S.isAdmin ? "Administradora" : "Ativa"}</span></div>
       <p class="small muted" style="margin:0">${esc(S.user.email)}</p>
-      <p class="small muted" style="margin:0">Modo offline: ${canOffline() ? "liberado" : "libera no " + (OFFLINE_AFTER_DAYS + 1) + "º dia de assinatura"}. ${canOffline() ? "Vale por mais " + left + (left === 1 ? " dia" : " dias") + " sem internet." : ""}</p>
+      <p class="small muted" style="margin:0">Modo offline: ${canOffline() ? "liberado" : "liberado assim que o acesso for aprovado"}. ${canOffline() ? "Vale por mais " + left + (left === 1 ? " dia" : " dias") + " sem internet." : ""}</p>
       <p class="small muted" style="margin:0">${S.saved.size} ${S.saved.size === 1 ? "tom salvo" : "tons salvos"} neste aparelho.</p>
       <div class="hrow">${S.saved.size ? `<button class="btn sm" data-a="wipe">Apagar tudo do aparelho</button>` : ""}<button class="btn sm" data-a="logout">Sair</button></div>
     </div>

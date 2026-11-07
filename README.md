@@ -7,7 +7,7 @@ Web app instalável (PWA) para assinantes do Trio Playback: vídeo com letra (ly
 - **Liberação:** e-mail na coleção `allowed` entra direto; os demais ficam `pending` até a Janaine liberar no painel.
 - **Painel da Janaine:** só para `janaine@janainepavani.com` com e-mail confirmado. Pedidos, assinantes, e-mails autorizados, músicas e chave do offline.
 - **Arquivos:** Firebase Storage em `songs/{id}/...`. Só assinante ativa lê; só a Janaine envia.
-- **Offline:** arquivos guardados no IndexedDB, criptografados (AES-GCM) com a chave de `config/offline`. Libera no 8º dia após a ativação. O app precisa se conectar a cada 7 dias; se a conta deixar de estar ativa, apaga tudo na próxima conexão.
+- **Offline:** arquivos guardados no IndexedDB, criptografados (AES-GCM) com a chave de `config/offline`. Libera assim que a conta é ativada. O app precisa se conectar a cada 7 dias; se a conta deixar de estar ativa, apaga tudo na próxima conexão.
 - **Marca:** e-mail da assinante sobre o vídeo.
 
 ## Dados (Firestore)
