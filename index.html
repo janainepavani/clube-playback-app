@@ -75,6 +75,9 @@ button.row:hover{border-color:var(--muted)}
 .vbox{position:relative;border-radius:12px;overflow:hidden;background:#000}
 .vbox video{width:100%;display:block;background:#000}
 .vbox .wm{position:absolute;right:10px;bottom:44px;font-size:11px;color:#ffffff40;pointer-events:none;user-select:none}
+@keyframes nudge{0%,100%{transform:scale(1)}30%{transform:scale(1.12)}60%{transform:scale(.97)}}
+.nudge{animation:nudge .6s ease 2;border-color:var(--bronze)!important;color:var(--bronze)}
+@media (prefers-reduced-motion:reduce){.nudge{animation:none}}
 .vbox .lockcover{position:absolute;inset:0;z-index:2;cursor:not-allowed}
 .vbox.mini{position:sticky;top:8px;z-index:3;width:48%;margin-left:auto;box-shadow:0 8px 24px #000c}
 .vbox.mini .wm{bottom:8px;font-size:9px}

@@ -675,6 +675,12 @@ async function loadPresVideo(s, k, box, want, reuse) {
 
 /* ---------------- ações ---------------- */
 document.addEventListener("click", async e => {
+  if (e.target.closest(".lockcover")) {
+    toast("Tela travada. Toque em Destravar, lá em cima, para mexer na música.");
+    const lb = presIn.querySelector('[data-a="plock"]');
+    if (lb) { lb.classList.remove("nudge"); void lb.offsetWidth; lb.classList.add("nudge"); }
+    return;
+  }
   const el = e.target.closest("[data-a]"); if (!el) return;
   const a = el.dataset.a;
   try {
