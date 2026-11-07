@@ -583,7 +583,7 @@ async function keepAwake() { try { if (presOpen && "wakeLock" in navigator && do
 function releaseAwake() { try { if (wakeLock) wakeLock.release(); } catch (e) {} wakeLock = null; }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && presOpen) keepAwake(); });
 const pres = $("pres"), presIn = $("presIn");
-function openPres() { presOpen = true; presIdx = 0; presReorder = false; presReady = false; presView = "video"; presSheet = 0; presLocked = true; presKeys = false; presAutoGo = false; pres.classList.add("show"); keepAwake(); document.body.style.overflow = "hidden"; renderPres(); }
+function openPres() { presOpen = true; presIdx = 0; presReorder = false; presReady = false; presView = "video"; presSheet = 0; presLocked = false; presKeys = false; presAutoGo = false; pres.classList.add("show"); keepAwake(); document.body.style.overflow = "hidden"; renderPres(); }
 function closePres() { presOpen = false; releaseAwake(); const v = presIn.querySelector("video"); if (v) v.pause(); pres.classList.remove("show"); presIn.innerHTML = ""; document.body.style.overflow = ""; presMounted = null; presDocKey = null; render(); }
 let presMounted = null, presDocKey = null;
 function renderPres() {
@@ -599,7 +599,7 @@ function renderPres() {
   presIn.innerHTML = `
     <div class="hrow spread"><span class="small muted">${esc(p.name)}  ·  música ${presIdx + 1} de ${items.length}</span>
       <span class="hrow">${L ? "" : `<button class="btn sm" data-a="closepres">Sair</button>`}<button class="btn sm ${L ? "" : "primary"}" data-a="plock" aria-label="${L ? "Destravar a tela" : "Travar a tela"}">${LOCK_SVG(!L)}${L ? "Destravar" : "Travar"}</button></span></div>
-    ${L ? `<p class="small muted" style="margin:0">Tela travada: dá para tocar, trocar de música e ver letra ou partitura. Para sair, mudar o tom ou a ordem, toque em Destravar.</p>` : ""}
+    ${L ? `<p class="small muted" style="margin:0">Tela travada: a música não para, não pula e não troca. Você pode olhar a letra e a partitura à vontade.</p>` : `<p class="small muted" style="margin:0">Dê o play e toque em Travar para proteger a música durante a apresentação.</p>`}
     <div><div class="now">${esc(s.name)}</div><div class="hrow" style="margin-top:8px"><span class="keychip">${esc(k)}</span>${s.bpm ? `<span class="muted">BPM ${esc(s.bpm)}</span>` : ""}
       ${!L && s.keys.length > 1 ? `<button class="link" data-a="pkeys">${presKeys ? "Fechar" : "Trocar tom"}</button>` : ""}${presReady ? `<span class="pill ok">Pronta. Toque quando quiser.</span>` : ""}</div>
       ${!L && presKeys ? `<div class="hrow" style="margin-top:8px">${s.keys.map(x => `<button class="btn sm ${x.key === k ? "primary" : ""}" data-a="pkey" data-k="${esc(x.key)}">${esc(x.key)}</button>`).join("")}</div>` : ""}</div>
@@ -607,7 +607,7 @@ function renderPres() {
     <div id="pvslot"></div>
     ${presView === "partitura" && sheets.length > 1 ? `<div class="hrow">${sheets.map((x, i) => `<button class="btn sm ${i === presSheet ? "primary" : ""}" data-a="psheet" data-i="${i}">${esc(x.label || "Partitura " + (i + 1))}</button>`).join("")}</div>` : ""}
     <div id="pdocslot"></div>
-    <div class="ctl"><button class="btn" data-a="pgo" data-d="-1" ${presIdx === 0 ? "disabled" : ""}>Anterior</button><button class="btn primary" data-a="pgo" data-d="1" ${presIdx === items.length - 1 ? "disabled" : ""}>Próxima</button></div>
+    ${L ? (presReady ? `<p class="small" style="margin:0;text-align:center;color:var(--warn)">A próxima está pronta. Destrave para dar o play.</p>` : "") : `<div class="ctl"><button class="btn" data-a="pgo" data-d="-1" ${presIdx === 0 ? "disabled" : ""}>Anterior</button><button class="btn primary" data-a="pgo" data-d="1" ${presIdx === items.length - 1 ? "disabled" : ""}>Próxima</button></div>`}
     ${L ? `<p class="small muted" style="margin:0;text-align:center">Ao terminar cada música: ${presAuto ? "a próxima começa sozinha" : "espera o seu toque"}</p>` : `<div class="hrow"><button class="btn sm ghost" data-a="pre">${presReorder ? "Concluir ordem" : "Reordenar a playlist"}</button>
       <button class="btn sm ${presAuto ? "primary" : "ghost"}" data-a="pauto">${presAuto ? "Ao terminar: começa a próxima" : "Ao terminar: espera meu toque"}</button></div>`}
     <div><div class="small muted" style="margin-bottom:6px">${presReorder && !L ? "Toque em Subir ou Descer. A música atual não muda." : "A seguir"}</div>
@@ -620,6 +620,7 @@ function renderPres() {
   else if (keepV && presAutoGo && keepV.querySelector("video")) { slot.replaceWith(keepV); presMounted = want; loadPresVideo(s, k, keepV, want, true); }
   else { const box = document.createElement("div"); box.id = "pv"; box.className = "vbox"; box.innerHTML = `<div class="empty">Carregando o vídeo...</div>`; slot.replaceWith(box); presMounted = want; loadPresVideo(s, k, box, want); }
   $("pv").classList.toggle("mini", presView !== "video");
+  applyPresLock();
   // letra ou partitura, sem parar o vídeo
   const dslot = $("pdocslot");
   if (presView === "video") { presDocKey = null; }
@@ -644,6 +645,14 @@ function renderPres() {
   const n = items[presIdx + 1]; // pré-carrega a próxima
   if (n) { const ns = byId(n), nk = keyOf(ns), nkd = keyData(ns, nk); fileBlob(nkd.video, S.saved.has(n + "|" + nk) ? n + "|" + nk + "|video" : null).catch(() => {}); }
 }
+// trava: sem play, pause, avanço ou volta no vídeo
+function applyPresLock() {
+  const box = $("pv"); if (!box) return;
+  const v = box.querySelector("video"); if (v) v.controls = !presLocked;
+  let cover = box.querySelector(".lockcover");
+  if (presLocked && !cover) { cover = document.createElement("div"); cover.className = "lockcover"; cover.setAttribute("aria-hidden", "true"); box.appendChild(cover); }
+  if (!presLocked && cover) cover.remove();
+}
 async function loadPresVideo(s, k, box, want, reuse) {
   const kd = keyData(s, k); const offId = want;
   try {
@@ -658,7 +667,7 @@ async function loadPresVideo(s, k, box, want, reuse) {
       return;
     }
     box.innerHTML = `<video controls playsinline preload="auto" src="${urlOf(b, offId + "|video")}"></video><span class="wm">${esc(S.user.email)}</span>`;
-    const v = box.querySelector("video"); videoFallback(v, b);
+    const v = box.querySelector("video"); videoFallback(v, b); applyPresLock();
     v.addEventListener("play", () => { if (presReady) { presReady = false; const pl = presIn.querySelector(".pill.ok"); if (pl) pl.remove(); } });
     v.addEventListener("ended", () => { const p = getPl(S.plId); const items = (p.items || []).filter(byId); if (presIdx < items.length - 1) { presIdx++; presSheet = 0; if (presAuto) { presAutoGo = true; presReady = false; } else presReady = true; renderPres(); } });
   } catch (e) { if (presMounted === want) box.innerHTML = `<div class="empty">Não consegui abrir o vídeo.</div>`; }
