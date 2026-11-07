@@ -188,6 +188,27 @@ const byId = id => S.songs.find(s => s.id === id);
 const keyOf = s => (S.profile && S.profile.prefKeys && S.profile.prefKeys[s.id] && s.keys.some(k => k.key === S.profile.prefKeys[s.id])) ? S.profile.prefKeys[s.id] : (s.keys[0] && s.keys[0].key);
 const keyData = (s, k) => s.keys.find(x => x.key === k) || s.keys[0];
 const getPl = id => S.playlists.find(p => p.id === id);
+// partituras de um tom (aceita o formato antigo, com uma só)
+const sheetsOf = kd => kd ? (kd.sheets && kd.sheets.length ? kd.sheets : (kd.sheet ? [{ label: "Partitura", path: kd.sheet }] : [])) : [];
+const isPdf = path => /\.pdf$/i.test(path || "");
+
+/* ---------------- PDF (letra e partitura) ---------------- */
+if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = "pdf.worker.min.js";
+async function showDoc(container, blob, path, alt) {
+  if (!isPdf(path)) { container.innerHTML = `<img class="sheet" alt="${esc(alt)}" src="${urlOf(blob, path)}">`; return; }
+  if (!window.pdfjsLib) { container.innerHTML = `<div class="empty">Não consegui abrir o PDF neste aparelho.</div>`; return; }
+  const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+  const wrap = document.createElement("div"); wrap.className = "stack"; wrap.setAttribute("aria-label", alt);
+  const w = Math.min(container.clientWidth || 700, 1100), dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const v1 = page.getViewport({ scale: 1 }); const vp = page.getViewport({ scale: (w / v1.width) * dpr });
+    const c = document.createElement("canvas"); c.width = vp.width; c.height = vp.height; c.className = "sheet"; c.style.width = "100%";
+    await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+    wrap.appendChild(c);
+  }
+  container.replaceChildren(wrap);
+}
 
 function setConn() { const c = $("conn"); c.textContent = navigator.onLine ? "Online" : "Sem internet"; c.classList.toggle("off", !navigator.onLine); }
 window.addEventListener("online", () => { setConn(); render(); });
@@ -313,15 +334,22 @@ async function mountSong() {
   }
   const d = $("doc"); if (!d) return;
   if (S.tab === "video") { d.innerHTML = ""; return; }
-  const path = S.tab === "letra" ? s.letra : kd.sheet;
-  const oid = S.tab === "letra" ? s.id + "|letra" : offId + "|sheet";
+  const sheets = sheetsOf(kd);
+  const si = Math.min(S.sheetIdx || 0, Math.max(0, sheets.length - 1));
+  const path = S.tab === "letra" ? s.letra : (sheets[si] && sheets[si].path);
+  const oid = S.tab === "letra" ? s.id + "|letra" : offId + "|sheet|" + si;
+  const chips = S.tab === "partitura" && sheets.length > 1 ? `<div class="hrow" style="margin-bottom:10px">${sheets.map((x, i) => `<button class="btn sm ${i === si ? "primary" : ""}" data-a="sheet" data-i="${i}">${esc(x.label || "Partitura " + (i + 1))}</button>`).join("")}</div>` : "";
   if (!path) { d.innerHTML = `<div class="empty">${S.tab === "letra" ? "Letra" : "Partitura"} ainda não disponível para esta música.</div>`; return; }
-  d.innerHTML = `<div class="empty">Abrindo...</div>`;
+  const docKey = S.tab + "|" + oid;
+  if (d.dataset.k === docKey && d.querySelector(".sheet")) return;
+  d.dataset.k = docKey;
+  d.innerHTML = chips + `<div id="docIn"><div class="empty">Abrindo...</div></div>`;
   try {
     const b = await fileBlob(path, S.saved.has(offId) ? oid : null);
-    if (!$("doc")) return;
-    $("doc").innerHTML = b ? `<img class="sheet" alt="${S.tab === "letra" ? "Letra" : "Partitura"} de ${esc(s.name)}" src="${urlOf(b, oid)}">` : `<div class="empty">Sem internet, e isto não está salvo no aparelho.</div>`;
-  } catch (e) { if ($("doc")) $("doc").innerHTML = `<div class="empty">Não consegui abrir agora.</div>`; }
+    const box = $("docIn"); if (!box || $("doc").dataset.k !== docKey) return;
+    if (b) await showDoc(box, b, path, (S.tab === "letra" ? "Letra" : "Partitura") + " de " + s.name);
+    else box.innerHTML = `<div class="empty">Sem internet, e isto não está salvo no aparelho.</div>`;
+  } catch (e) { console.warn(e); const box = $("docIn"); if (box) box.innerHTML = `<div class="empty">Não consegui abrir agora.</div>`; }
 }
 // se o iPhone recusar o endereço blob, tenta com data URL
 function videoFallback(v, blob) {
@@ -337,7 +365,7 @@ async function saveSong(s, k) {
   if (S.saved.has(offId)) return;
   S.busy[offId] = 0; render();
   try {
-    const jobs = [[kd.video, offId + "|video"], [kd.sheet, offId + "|sheet"], [s.letra, s.id + "|letra"]].filter(j => j[0]);
+    const jobs = [[kd.video, offId + "|video"], ...sheetsOf(kd).map((x, i) => [x.path, offId + "|sheet|" + i]), [s.letra, s.id + "|letra"]].filter(j => j[0]);
     let i = 0;
     for (const [path, id] of jobs) {
       const b = await getBlob(sref(storage, path));
@@ -350,7 +378,7 @@ async function saveSong(s, k) {
 }
 async function unsaveSong(s, k) {
   const offId = s.id + "|" + k;
-  for (const p of ["|video", "|sheet"]) await idbDel(offId + p).catch(() => {});
+  for (const key of await idbKeys().catch(() => [])) if (String(key).startsWith(offId + "|")) await idbDel(key).catch(() => {});
   await refreshSaved();
   if (![...S.saved].some(x => x.startsWith(s.id + "|"))) await idbDel(s.id + "|letra").catch(() => {});
   render();
@@ -448,12 +476,14 @@ function viewSongForm() {
     <div class="card">
       <label for="sName">Nome da música</label><input class="field" id="sName" value="${esc(f.name)}" required ${f.id ? "readonly" : ""}>
       <label for="sBpm">BPM</label><input class="field" id="sBpm" inputmode="numeric" value="${esc(f.bpm || "")}">
-      <label for="sLetra">Letra (imagem JPG ou PNG)${f.letra ? "  ·  já enviada" : ""}</label><input class="field" id="sLetra" type="file" accept="image/*">
+      <label for="sLetra">Letra (PDF ou imagem)${f.letra ? "  ·  já enviada" : ""}</label><input class="field" id="sLetra" type="file" accept="application/pdf,image/*">
     </div>
     ${f.keys.map((k, i) => `<div class="card"><div class="hrow spread"><b>Tom ${i + 1}</b>${f.keys.length > 1 ? `<button class="link" type="button" data-a="rmkey" data-i="${i}">Tirar este tom</button>` : ""}</div>
       <label for="k${i}">Tonalidade (ex.: Cm)</label><input class="field" id="k${i}" value="${esc(k.key)}" required>
       <label for="v${i}">Vídeo 720p (MP4)${k.video ? "  ·  já enviado" : ""}</label><input class="field" id="v${i}" type="file" accept="video/mp4">
-      <label for="p${i}">Partitura (imagem JPG ou PNG)${k.sheet ? "  ·  já enviada" : ""}</label><input class="field" id="p${i}" type="file" accept="image/*">
+      <b class="small">Partituras deste tom</b>
+      ${sheetsOf(k).map((x, j) => `<div class="hrow"><input class="field" style="flex:1" id="sl${i}_${j}" value="${esc(x.label)}" aria-label="Nome da partitura"><button class="btn sm ghost" type="button" data-a="rmsheet" data-i="${i}" data-j="${j}">Tirar</button></div>`).join("") || `<p class="small muted" style="margin:0">Nenhuma ainda.</p>`}
+      <label for="p${i}">Adicionar partituras (PDF ou imagem, pode escolher várias de uma vez). O nome do arquivo vira o nome do botão, e você pode mudar depois.</label><input class="field" id="p${i}" type="file" accept="application/pdf,image/*" multiple>
     </div>`).join("")}
     <button class="btn" type="button" data-a="addkey">Adicionar outro tom</button>
     <div class="bar" id="upBar" hidden><i></i></div><p class="small muted" id="upMsg" style="margin:0"></p>
@@ -464,7 +494,11 @@ function viewSongForm() {
 function readForm() {
   const f = adminForm; if (!$("sName")) return;
   f.name = $("sName").value.trim(); f.bpm = $("sBpm").value.trim();
-  f.keys.forEach((k, i) => { k.key = $("k" + i).value.trim(); k._v = $("v" + i).files[0]; k._p = $("p" + i).files[0]; });
+  f.keys.forEach((k, i) => {
+    k.key = $("k" + i).value.trim(); k._v = $("v" + i).files[0]; k._p = [...$("p" + i).files];
+    k.sheets = sheetsOf(k).map((x, j) => ({ label: ($("sl" + i + "_" + j) ? $("sl" + i + "_" + j).value.trim() : x.label) || "Partitura", path: x.path }));
+    delete k.sheet;
+  });
   f._l = $("sLetra").files[0];
 }
 function upload(path, file, onProg) {
@@ -484,7 +518,7 @@ async function submitSong() {
   f.keys.forEach((k, i) => {
     const ks = slug(k.key) || "tom" + i;
     if (k._v) jobs.push(["v" + i, k._v, `songs/${id}/${ks}-video.mp4`]);
-    if (k._p) jobs.push(["p" + i, k._p, `songs/${id}/${ks}-partitura.${(k._p.name.split(".").pop() || "jpg").toLowerCase()}`]);
+    (k._p || []).forEach((file, j) => jobs.push(["p" + i, file, `songs/${id}/${ks}-partitura-${Date.now().toString(36)}${j}.${(file.name.split(".").pop() || "pdf").toLowerCase()}`]));
   });
   const bar = $("upBar"), msg = $("upMsg"); bar.hidden = false;
   const total = jobs.reduce((a, j) => a + j[1].size, 0) || 1; let done = 0;
@@ -494,11 +528,11 @@ async function submitSong() {
       await upload(path, file, p => { bar.firstElementChild.style.width = ((done + p * file.size) / total * 100) + "%"; });
       done += file.size;
       if (tag === "letra") f.letra = path;
-      else { const i = +tag.slice(1); if (tag[0] === "v") f.keys[i].video = path; else f.keys[i].sheet = path; }
+      else { const i = +tag.slice(1); if (tag[0] === "v") f.keys[i].video = path; else f.keys[i].sheets.push({ label: file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim(), path }); }
     }
     await setDoc(doc(db, "songs", id), {
       name: f.name, bpm: f.bpm || null, letra: f.letra || null,
-      keys: f.keys.map(k => ({ key: k.key, video: k.video, sheet: k.sheet || null })), updatedAt: serverTimestamp()
+      keys: f.keys.map(k => ({ key: k.key, video: k.video, sheets: k.sheets || [] })), updatedAt: serverTimestamp()
     });
     toast("Música salva."); adminForm = null; render();
   } catch (e) { console.warn(e); msg.textContent = "Erro ao enviar: " + (e.code || e.message) + ". Confira se o armazenamento do Firebase já foi ativado."; }
@@ -533,7 +567,7 @@ function renderPres() {
   if (keepV && presMounted === want) slot.replaceWith(keepV);
   else { const box = document.createElement("div"); box.id = "pv"; box.className = "vbox"; box.innerHTML = `<div class="empty">Carregando o vídeo...</div>`; slot.replaceWith(box); presMounted = want; loadPresVideo(s, k, box, want); }
   if (presLyrics && s.letra) {
-    fileBlob(s.letra, S.saved.has(want) ? s.id + "|letra" : null).then(b => { const el = $("plyrslot"); if (el && b) el.innerHTML = `<img class="sheet" alt="Letra de ${esc(s.name)}" src="${urlOf(b, s.id + "|letra")}">`; }).catch(() => {});
+    fileBlob(s.letra, S.saved.has(want) ? s.id + "|letra" : null).then(b => { const el = $("plyrslot"); if (el && b) showDoc(el, b, s.letra, "Letra de " + s.name); }).catch(() => {});
   }
   const n = items[presIdx + 1]; // pré-carrega a próxima
   if (n) { const ns = byId(n), nk = keyOf(ns), nkd = keyData(ns, nk); fileBlob(nkd.video, S.saved.has(n + "|" + nk) ? n + "|" + nk + "|video" : null).catch(() => {}); }
@@ -557,7 +591,7 @@ document.addEventListener("click", async e => {
   const a = el.dataset.a;
   try {
     if (a === "nav") { S.view = el.dataset.v; S.addTo = false; S.showKeys = false; if (S.view === "admin") { S.adminData = null; adminForm = null; } mountedKey = null; render(); window.scrollTo(0, 0); }
-    else if (a === "open") { S.songId = el.dataset.id; S.view = "song"; S.tab = "video"; S.showKeys = false; S.addTo = false; mountedKey = null; render(); window.scrollTo(0, 0); }
+    else if (a === "open") { S.songId = el.dataset.id; S.view = "song"; S.tab = "video"; S.sheetIdx = 0; S.showKeys = false; S.addTo = false; mountedKey = null; render(); window.scrollTo(0, 0); }
     else if (a === "tab") { S.tab = el.dataset.t; render(); }
     else if (a === "showkeys") { S.showKeys = !S.showKeys; render(); }
     else if (a === "setkey") { const k = el.dataset.k; S.profile.prefKeys = { ...(S.profile.prefKeys || {}), [S.songId]: k }; S.showKeys = false; mountedKey = null; render(); updateDoc(doc(db, "users", S.user.uid), { prefKeys: S.profile.prefKeys }).catch(() => {}); toast("Tom " + k + " fixado para esta música."); }
@@ -590,9 +624,11 @@ document.addEventListener("click", async e => {
     else if (a === "revoke") { const em = el.dataset.em; await deleteDoc(doc(db, "allowed", em)).catch(() => {}); await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Acesso retirado de " + em + ". O conteúdo salvo some na próxima conexão dela."); S.adminData = null; render(); }
     else if (a === "addemails") { const list = [...new Set(($("emails").value.match(/[^\s,;<>]+@[^\s,;<>]+\.[^\s,;<>]+/g) || []).map(x => x.toLowerCase()))]; if (!list.length) return toast("Nenhum e-mail encontrado no texto."); for (const em of list) await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); toast(list.length + (list.length === 1 ? " e-mail adicionado." : " e-mails adicionados.")); S.adminData = null; render(); }
     else if (a === "rmallowed") { await deleteDoc(doc(db, "allowed", el.dataset.em)); S.adminData = null; render(); }
-    else if (a === "newsong") { adminForm = { name: "", bpm: "", letra: null, keys: [{ key: "", video: null, sheet: null }, { key: "", video: null, sheet: null }] }; render(); window.scrollTo(0, 0); }
+    else if (a === "newsong") { adminForm = { name: "", bpm: "", letra: null, keys: [{ key: "", video: null, sheets: [] }, { key: "", video: null, sheets: [] }] }; render(); window.scrollTo(0, 0); }
     else if (a === "editsong") { const s = byId(el.dataset.id); adminForm = JSON.parse(JSON.stringify({ id: s.id, name: s.name, bpm: s.bpm, letra: s.letra, keys: s.keys })); render(); window.scrollTo(0, 0); }
-    else if (a === "addkey") { readForm(); adminForm.keys.push({ key: "", video: null, sheet: null }); render(); }
+    else if (a === "rmsheet") { readForm(); adminForm.keys[+el.dataset.i].sheets.splice(+el.dataset.j, 1); render(); }
+    else if (a === "sheet") { S.sheetIdx = +el.dataset.i; render(); }
+    else if (a === "addkey") { readForm(); adminForm.keys.push({ key: "", video: null, sheets: [] }); render(); }
     else if (a === "rmkey") { readForm(); adminForm.keys.splice(+el.dataset.i, 1); render(); }
     else if (a === "cancelsong") { adminForm = null; render(); }
     else if (a === "delsong") { await deleteDoc(doc(db, "songs", adminForm.id)); adminForm = null; toast("Música apagada do catálogo."); render(); }

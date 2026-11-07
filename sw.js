@@ -1,6 +1,7 @@
 // Guarda o "esqueleto" do app para ele abrir sem internet.
+// Com internet, busca sempre a versão mais nova; sem internet, usa a guardada.
 // Vídeos, letras e partituras ficam no armazenamento criptografado do app, não aqui.
-const CACHE = "clube-app-v2";
+const CACHE = "clube-app-v3";
 const SDK = "https://www.gstatic.com/firebasejs/10.14.1/";
 const SHELL = [
   "./", "./index.html", "./app.js", "./firebase-config.js", "./manifest.webmanifest",
@@ -9,7 +10,8 @@ const SHELL = [
 ];
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // guarda um por um, para um arquivo que falhe não travar a atualização
+  e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => c.add(new Request(u, { cache: "reload" })).catch(() => {})))).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
@@ -21,10 +23,14 @@ self.addEventListener("fetch", e => {
   const sdk = url.href.startsWith(SDK);
   const fonts = url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com";
   if (!mine && !sdk && !fonts) return; // Firebase (dados e arquivos) passa direto
-  // Usa o que está guardado e atualiza por trás, para abrir rápido e offline
-  e.respondWith(caches.open(CACHE).then(async c => {
-    const hit = await c.match(e.request, { ignoreSearch: mine });
-    const net = fetch(e.request).then(r => { if (r.ok || r.type === "opaque") c.put(e.request, r.clone()); return r; }).catch(() => null);
-    return hit || (await net) || (mine && e.request.mode === "navigate" ? c.match("./index.html") : Response.error());
-  }));
+  if (mine) {
+    // arquivos do app: internet primeiro, guardado se estiver sem conexão
+    e.respondWith(fetch(e.request, { cache: "no-cache" }).then(r => {
+      if (r.ok) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
+      return r;
+    }).catch(async () => (await caches.match(e.request, { ignoreSearch: true })) || (e.request.mode === "navigate" ? caches.match("./index.html") : Response.error())));
+    return;
+  }
+  // biblioteca do Firebase e fontes: não mudam, usa o guardado
+  e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r; })));
 });
