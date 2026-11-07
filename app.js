@@ -274,8 +274,10 @@ function viewLogin() {
     <p class="muted small" style="margin:0">Use o mesmo e-mail da sua assinatura do Trio Playback.</p>
     <label for="em">E-mail</label><input class="field" id="em" type="email" autocomplete="email" required>
     <label for="pw">Senha</label><input class="field" id="pw" type="password" autocomplete="current-password" minlength="6" required>
+    <p id="loginMsg" class="small" style="display:none;margin:0;color:var(--bronze)"></p>
     <button class="btn primary" type="submit" data-mode="in">Entrar</button>
     <button class="btn" type="submit" data-mode="up">Primeiro acesso: criar minha senha</button>
+    <p class="small muted" style="margin:0">Primeira vez aqui? Escolha uma senha de pelo menos 6 caracteres e toque em qualquer um dos botões. A conta é criada e fica esperando a Janaine liberar.</p>
     <button class="link" type="button" data-a="reset">Esqueci minha senha</button>
   </form>
   ${CONTACT}
@@ -737,16 +739,43 @@ document.addEventListener("click", async e => {
 
 const AUTH_ERR = {
   "auth/invalid-credential": "E-mail ou senha incorretos.", "auth/wrong-password": "Senha incorreta.", "auth/user-not-found": "Não existe conta com esse e-mail. Use Primeiro acesso.",
-  "auth/email-already-in-use": "Esse e-mail já tem conta. Use Entrar.", "auth/weak-password": "A senha precisa ter pelo menos 6 caracteres.",
+  "auth/email-already-in-use": "Esse e-mail já tem conta. Use Entrar.", "auth/weak-password": "A senha precisa ter pelo menos 6 caracteres.", "auth/operation-not-allowed": "O cadastro por e-mail está desligado no Firebase. Avise a Janaine.", "auth/unauthorized-domain": "Este endereço do app não está autorizado no Firebase. Avise a Janaine.",
   "auth/invalid-email": "Esse e-mail não parece válido.", "auth/network-request-failed": "Sem internet. Conecte-se para entrar.", "auth/too-many-requests": "Muitas tentativas. Espere alguns minutos."
 };
+function loginMsg(t) { const m = $("loginMsg"); if (m) { m.textContent = t; m.style.display = t ? "block" : "none"; } if (t) toast(t); }
+async function smartLogin(mode, em, pw) {
+  loginMsg("");
+  const btns = document.querySelectorAll("#loginForm button[type=submit]"); btns.forEach(b => b.disabled = true);
+  try {
+    if (mode === "up") {
+      try { await createUserWithEmailAndPassword(auth, em, pw); }
+      catch (err) {
+        if (err.code !== "auth/email-already-in-use") throw err;
+        try { await signInWithEmailAndPassword(auth, em, pw); }
+        catch (_) { throw { code: "x/exists-wrong-pw" }; }
+      }
+    } else {
+      try { await signInWithEmailAndPassword(auth, em, pw); }
+      catch (err) {
+        if (!["auth/invalid-credential", "auth/user-not-found", "auth/invalid-login-credentials"].includes(err.code)) throw err;
+        // pode ser alguém que ainda não tem conta: cria a conta com essa senha
+        try { await createUserWithEmailAndPassword(auth, em, pw); }
+        catch (err2) { throw err2.code === "auth/email-already-in-use" ? { code: "x/exists-wrong-pw" } : err2; }
+      }
+    }
+  } catch (err) {
+    console.warn(err);
+    loginMsg(err.code === "x/exists-wrong-pw" ? "Esse e-mail já tem conta, mas a senha não confere. Toque em Esqueci minha senha para criar uma nova." : (AUTH_ERR[err.code] || "Não deu certo: " + (err.code || err.message)));
+  } finally { btns.forEach(b => b.disabled = false); }
+}
 document.addEventListener("submit", async e => {
   e.preventDefault();
   const f = e.target;
   try {
     if (f.id === "loginForm") {
-      const mode = e.submitter && e.submitter.dataset.mode; const em = $("em").value.trim(), pw = $("pw").value;
-      if (mode === "up") await createUserWithEmailAndPassword(auth, em, pw); else await signInWithEmailAndPassword(auth, em, pw);
+      const mode = (e.submitter && e.submitter.dataset.mode) || "in"; const em = $("em").value.trim().toLowerCase(), pw = $("pw").value;
+      await smartLogin(mode, em, pw);
+      return;
     } else if (f.id === "newPl" || f.id === "newPlFromSong") {
       const name = f.querySelector("input").value.trim(); if (!name) return toast("Dê um nome para a playlist.");
       const r = await addDoc(collection(db, "users", S.user.uid, "playlists"), { name, items: f.id === "newPlFromSong" ? [S.songId] : [], updatedAt: serverTimestamp() });
