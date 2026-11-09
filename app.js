@@ -534,7 +534,7 @@ function viewAdmin() {
   const A = S.adminData;
   if (adminForm) return viewSongForm();
   return `<button class="link" data-a="nav" data-v="account">Voltar ao app</button>
-  <div class="stack" style="margin-top:12px">
+  <div class="stack admin" style="margin-top:12px">
     <div class="hrow spread"><h1 class="title">Painel da Janaine</h1><button class="btn sm" data-a="adminreload">Atualizar</button></div>
     ${A.hasKey ? "" : `<div class="card"><b>Ative o modo offline</b><p class="small muted" style="margin:0">Cria a chave que embaralha os vídeos salvos nos aparelhos. Faça isso uma vez só.</p><button class="btn primary" data-a="mkkey">Ativar modo offline</button></div>`}
     <div class="card"><div class="hrow spread"><b>Pedidos de acesso</b><span class="pill ${A.pending.length ? "warn" : ""}">${A.pending.length}</span></div>
