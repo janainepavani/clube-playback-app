@@ -57,10 +57,9 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // E-mails de aviso (lidos e enviados pela extensão Trigger Email)
-    match /mail/{id} {
-      allow create: if isAdmin();
-      allow read, update, delete: if false;
+    // Configuração do e-mail de aviso (endereço do script e chave): só a Janaine
+    match /private/{doc} {
+      allow read, write: if isAdmin();
     }
 
     // Chave do modo offline

@@ -9,7 +9,7 @@ Web app instalável (PWA) para assinantes do Trio Playback: vídeo com letra (ly
 - **Arquivos:** Firebase Storage em `songs/{id}/...`. Só assinante ativa lê; só a Janaine envia.
 - **Offline:** arquivos guardados no IndexedDB, criptografados (AES-GCM) com a chave de `config/offline`. Libera assim que a conta é ativada. O app precisa se conectar a cada 7 dias; se a conta deixar de estar ativa, apaga tudo na próxima conexão.
 - **Marca:** e-mail da assinante sobre o vídeo.
-- **Aviso de liberação:** ao tocar em Liberar, o app grava um documento em `mail` e a extensão Trigger Email do Firebase envia o e-mail pelo SMTP do Google Workspace (janaine@janainepavani.com).
+- **Aviso de liberação:** ao tocar em Liberar, o app chama um script do Google (Apps Script, na conta janaine@janainepavani.com) que envia o e-mail de boas-vindas. Endereço do script e chave ficam em `private/mail` (só a Janaine lê). O código do script está em `apps-script-email.gs` (a chave real fica só no script e no painel).
 
 ## Dados (Firestore)
 - `allowed/{email}`
@@ -17,7 +17,7 @@ Web app instalável (PWA) para assinantes do Trio Playback: vídeo com letra (ly
 - `users/{uid}/playlists/{id}`: name, items (ids das músicas)
 - `songs/{id}`: name, bpm, letra (caminho), keys [{key, video, sheet}]
 - `config/offline`: k (chave base64)
-- `mail/{id}`: to, message {subject, text, html} (fila da extensão Trigger Email)
+- `private/mail`: url, k (script do e-mail de aviso)
 
 ## Publicar
 1. Regras: copiar `firestore.rules` e `storage.rules` no console do Firebase (aba Regras de cada produto).

@@ -37,34 +37,15 @@ let unsub = [];
 const DAY = 86400000;
 const $ = id => document.getElementById(id);
 const main = $("main");
-// E-mail de aviso quando a Janaine libera o acesso (enviado pela extensão Trigger Email do Firebase, coleção "mail")
-const APP_URL = "https://app.playback.janainepavani.com";
-function welcomeMail(to) {
-  const text = `Olá!
-
-Seu acesso ao app do Trio Playback foi liberado.
-
-Para entrar, abra ${APP_URL} e use o mesmo e-mail e a senha que você criou.
-
-Dica: no iPhone, abra o link no Safari, toque em Compartilhar e depois em "Adicionar à Tela de Início". No Android, abra no Chrome e toque em "Instalar app". Assim o app fica no seu celular como qualquer outro.
-
-Se esquecer a senha, toque em "Esqueci minha senha" na tela de entrada.
-
-Qualquer dúvida, é só responder este e-mail ou me chamar no WhatsApp: https://wa.me/5541998771712
-
-Um abraço,
-Janaine Pavani`;
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222;max-width:520px">
-<p>Olá!</p>
-<p>Seu acesso ao app do <b>Trio Playback</b> foi liberado.</p>
-<p>Para entrar, use o mesmo e-mail e a senha que você criou:</p>
-<p style="margin:24px 0"><a href="${APP_URL}" style="background:#b8956a;color:#111;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold">Abrir o app</a></p>
-<p><b>Dica:</b> no iPhone, abra o link no Safari, toque em Compartilhar e depois em "Adicionar à Tela de Início". No Android, abra no Chrome e toque em "Instalar app". Assim o app fica no seu celular como qualquer outro.</p>
-<p>Se esquecer a senha, toque em "Esqueci minha senha" na tela de entrada.</p>
-<p>Qualquer dúvida, é só responder este e-mail ou me chamar no <a href="https://wa.me/5541998771712">WhatsApp</a>.</p>
-<p>Um abraço,<br>Janaine Pavani</p>
-</div>`;
-  return { to, createdAt: serverTimestamp(), message: { subject: "Seu acesso ao app do Trio Playback foi liberado", text, html } };
+// E-mail de aviso quando a Janaine libera o acesso: um script do Google (Apps Script) na conta dela envia o e-mail.
+// O endereço e a chave ficam em private/mail, que só a Janaine lê. O texto do e-mail fica no script (apps-script-email.gs).
+async function sendWelcome(to) {
+  try {
+    const m = (S.adminData && S.adminData.mail) || (await getDoc(doc(db, "private", "mail"))).data();
+    if (!m || !m.url || !m.k) return false;
+    await fetch(m.url, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ k: m.k, to }) });
+    return true;
+  } catch (e) { return false; }
 }
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -492,17 +473,20 @@ function viewAccount() {
 let adminForm = null; // música sendo editada
 let adminLoading = false;
 async function loadAdmin() {
-  const [pend, act, allowed, cfg] = await Promise.all([
+  const [pend, act, allowed, cfg, mail] = await Promise.all([
     getDocs(query(collection(db, "users"), where("status", "==", "pending"))),
     getDocs(query(collection(db, "users"), where("status", "==", "active"))),
     getDocs(collection(db, "allowed")),
-    getDoc(doc(db, "config", "offline"))
+    getDoc(doc(db, "config", "offline")),
+    getDoc(doc(db, "private", "mail")).catch(() => null)
   ]);
   S.adminData = {
     pending: pend.docs.map(d => ({ uid: d.id, ...d.data() })),
     active: act.docs.map(d => ({ uid: d.id, ...d.data() })).sort((a, b) => a.email.localeCompare(b.email)),
     allowed: allowed.docs.map(d => d.id).sort(),
-    hasKey: cfg.exists()
+    hasKey: cfg.exists(),
+    mail: mail && mail.exists() ? mail.data() : null,
+    mailRules: mail !== null
   };
   render();
 }
@@ -520,6 +504,14 @@ function viewAdmin() {
     </div>
     <div class="card"><div class="hrow spread"><b>Assinantes com acesso</b><span class="pill ok">${A.active.length}</span></div>
       <div class="list">${A.active.map(u => `<div class="row"><span class="name">${esc(u.email)}</span><span class="meta">${u.email === ADMIN_EMAIL ? `<span class="pill brass">você</span>` : `<button class="btn sm danger" data-a="revoke" data-uid="${u.uid}" data-em="${esc(u.email)}">Tirar acesso</button>`}</span></div>`).join("") || `<p class="small muted" style="margin:0">Ninguém ainda.</p>`}</div>
+    </div>
+    <div class="card"><b>E-mail de aviso ao liberar</b>
+      ${A.mail && A.mail.url ? `<p class="small muted" style="margin:0">Ligado. Quando você toca em Liberar, a pessoa recebe um e-mail avisando que o acesso foi liberado.</p>` : `<p class="small muted" style="margin:0">${A.mailRules ? "Ainda não está ligado. Cole o endereço do script do Google e a chave." : "Antes, atualize as regras do Firestore no console do Firebase (bloco private)."}</p>`}
+      <details${A.mail && A.mail.url ? "" : " open"}><summary class="small muted">Configurar</summary>
+        <label for="mailurl">Endereço do script</label><input class="field" id="mailurl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(A.mail?.url || "")}">
+        <label for="mailkey">Chave</label><input class="field" id="mailkey" value="${esc(A.mail?.k || "")}">
+        <div class="hrow"><button class="btn sm primary" data-a="savemail">Salvar</button>${A.mail && A.mail.url ? `<button class="btn sm" data-a="testmail">Mandar um teste para mim</button>` : ""}</div>
+      </details>
     </div>
     <div class="card"><b>E-mails autorizados</b>
       <p class="small muted" style="margin:0">Cole aqui os e-mails das assinantes do Trio, um por linha. Quem estiver nesta lista entra direto, sem esperar.</p>
@@ -749,7 +741,9 @@ document.addEventListener("click", async e => {
     else if (a === "notif") { const r = await Notification.requestPermission(); toast(r === "granted" ? "Pronto. Com o app aberto ou em segundo plano, você recebe o aviso." : "Os avisos não foram autorizados neste aparelho."); render(); }
     else if (a === "adminreload") { S.adminData = null; render(); }
     else if (a === "mkkey") { const k = crypto.getRandomValues(new Uint8Array(32)); await setDoc(doc(db, "config", "offline"), { k: b64.to(k), createdAt: serverTimestamp() }); toast("Modo offline ativado."); S.adminData = null; render(); }
-    else if (a === "approve") { const em = el.dataset.em; await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); await updateDoc(doc(db, "users", el.dataset.uid), { status: "active", activatedAt: serverTimestamp() }); let mailed = true; try { await addDoc(collection(db, "mail"), welcomeMail(em)); } catch (e) { mailed = false; } toast("Acesso liberado para " + em + (mailed ? ". E-mail de aviso enviado." : ". O e-mail de aviso não foi enviado.")); S.adminData = null; render(); }
+    else if (a === "approve") { const em = el.dataset.em; await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); await updateDoc(doc(db, "users", el.dataset.uid), { status: "active", activatedAt: serverTimestamp() }); const mailed = await sendWelcome(em); toast("Acesso liberado para " + em + (mailed ? ". E-mail de aviso enviado." : ". Sem e-mail de aviso: avise a pessoa você mesma.")); S.adminData = null; render(); }
+    else if (a === "savemail") { const url = $("mailurl").value.trim(), k = $("mailkey").value.trim(); if (!/^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/.+\/exec$/.test(url)) return toast("O endereço precisa começar com https://script.google.com e terminar com /exec."); if (!k) return toast("Cole a chave."); try { await setDoc(doc(db, "private", "mail"), { url, k, savedAt: serverTimestamp() }); toast("Salvo. O e-mail de aviso está ligado."); } catch (e) { toast("Não salvou. Confira se as regras do Firestore foram atualizadas."); } S.adminData = null; render(); }
+    else if (a === "testmail") { const ok = await sendWelcome(ADMIN_EMAIL); toast(ok ? "Teste enviado. Confira sua caixa de entrada." : "Não deu para enviar o teste."); }
     else if (a === "deny") { await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Pedido recusado."); S.adminData = null; render(); }
     else if (a === "revoke") { const em = el.dataset.em; await deleteDoc(doc(db, "allowed", em)).catch(() => {}); await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Acesso retirado de " + em + ". O conteúdo salvo some na próxima conexão dela."); S.adminData = null; render(); }
     else if (a === "addemails") { const list = [...new Set(($("emails").value.match(/[^\s,;<>]+@[^\s,;<>]+\.[^\s,;<>]+/g) || []).map(x => x.toLowerCase()))]; if (!list.length) return toast("Nenhum e-mail encontrado no texto."); for (const em of list) await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); toast(list.length + (list.length === 1 ? " e-mail adicionado." : " e-mails adicionados.")); S.adminData = null; render(); }
