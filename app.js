@@ -114,7 +114,13 @@ const lastCheck = () => +(ls.get("cp-check") || 0);
 const activatedAt = () => { const t = S.profile && S.profile.activatedAt; return t && t.toMillis ? t.toMillis() : (t ? +t : Date.now()); };
 const daysActive = () => Math.floor((Date.now() - activatedAt()) / DAY);
 const canOffline = () => S.isAdmin || (S.profile && S.profile.status === "active" && true);
-const checkExpired = () => !S.isAdmin && Date.now() - lastCheck() > CHECK_EVERY_DAYS * DAY;
+const checkExpired = () => !S.isAdmin && (Date.now() - lastCheck() > CHECK_EVERY_DAYS * DAY || untilPassed());
+// Acesso com prazo (ex.: assinantes do Piano experimentando o app): data em allowed/{email}.until
+const untilMs = () => +(ls.get("cp-until") || 0);
+const untilPassed = () => !S.isAdmin && untilMs() > 0 && Date.now() > untilMs();
+const PIANOTRIO_URL = "https://sun.eduzz.com/E0D64ANY91?cupom=PIANOTRIO";
+const fmtDate = ms => new Date(ms).toLocaleDateString("pt-BR");
+const tsMs = t => t && t.toMillis ? t.toMillis() : (t ? +t : 0);
 function available(songId) {
   if (navigator.onLine) return true;
   return [...S.saved].some(k => k.startsWith(songId + "|")) && !checkExpired();
@@ -156,7 +162,8 @@ onAuthStateChanged(auth, async user => {
     S.profile = snap.data();
     if (!snap.metadata.fromCache) {
       S.profileFromServer = true;
-      if (S.profile.status === "active" || S.isAdmin) ls.set("cp-check", String(Date.now()));
+      if (!S.isAdmin) { try { const a = await getDoc(doc(db, "allowed", (user.email || "").toLowerCase())); const u = a.exists() ? tsMs(a.data().until) : 0; if (u) ls.set("cp-until", String(u)); else ls.del("cp-until"); } catch (e) {} }
+      if ((S.profile.status === "active" && !untilPassed()) || S.isAdmin) ls.set("cp-check", String(Date.now()));
       else if (S.saved.size || ls.get("cp-k")) await wipeOffline();
       if (S.profile.status === "pending") tryAutoActivate(user);
     }
@@ -246,7 +253,7 @@ window.addEventListener("offline", () => { setConn(); render(); });
 function render() {
   setConn();
   const st = S.profile && S.profile.status;
-  const inApp = S.user && (S.isAdmin || st === "active") && !(!navigator.onLine && checkExpired());
+  const inApp = S.user && (S.isAdmin || st === "active") && !untilPassed() && !(!navigator.onLine && checkExpired());
   $("dock").hidden = !inApp || S.view === "admin";
   const contaBtn = document.querySelector('#nav button[data-v="account"]');
   if (contaBtn) contaBtn.innerHTML = "Conta" + (S.isAdmin && S.pendingCount ? ` <span class="pill warn" style="margin-left:4px">${S.pendingCount}</span>` : "");
@@ -256,6 +263,7 @@ function render() {
   if (!navigator.onLine && checkExpired()) return paint(viewExpired());
   if (!S.isAdmin && st === "pending") return paint(viewPending());
   if (!S.isAdmin && st !== "active") return paint(viewBlocked());
+  if (untilPassed()) return paint(viewUntilEnded());
   const v = { catalog: viewCatalog, song: viewSong, playlists: viewPlaylists, playlist: viewPlaylist, account: viewAccount, admin: viewAdmin }[S.view] || viewCatalog;
   paint(v());
   if (S.view === "song") mountSong();
@@ -297,6 +305,14 @@ function viewPending() {
     <p class="muted">Sua conta foi criada com ${esc(S.user.email)}. A Janaine vai conferir sua assinatura do Trio Playback e liberar o acesso. Assim que ela liberar, o app abre sozinho.</p>
     ${(S.user.email || "").toLowerCase() === ADMIN_EMAIL ? `<div class="card"><b>Janaine, confirme seu e-mail para abrir o painel</b><p class="small muted" style="margin:0">Toque em enviar, abra o e-mail que chegar, clique no link e volte aqui em Já confirmei.</p><div class="hrow" style="justify-content:center"><button class="btn sm primary" data-a="verify">Enviar e-mail de confirmação</button><button class="btn sm" data-a="verified">Já confirmei</button></div></div>` : ""}
     <p class="small muted" style="margin:0">Se demorar, fale com a Janaine pelo <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">WhatsApp de Janaine Pavani</a>.</p>
+    <div class="hrow" style="justify-content:center"><button class="btn" data-a="logout">Sair</button></div></div>`;
+}
+function viewUntilEnded() {
+  return `<div class="card center stack"><h1 class="title">Seu período no app terminou</h1>
+    <p class="muted">O app é exclusivo de quem assina o Trio Playback. O seu acesso de experiência foi até ${fmtDate(untilMs())}, e as músicas salvas neste aparelho foram apagadas.</p>
+    <p class="muted">Para continuar com o app, passe para o Trio Playback com o desconto de quem já assina o Piano.</p>
+    <a class="btn primary" style="text-decoration:none" href="${PIANOTRIO_URL}" target="_blank" rel="noopener">Passar para o Trio com desconto</a>
+    ${CONTACT}
     <div class="hrow" style="justify-content:center"><button class="btn" data-a="logout">Sair</button></div></div>`;
 }
 function viewBlocked() {
@@ -492,6 +508,7 @@ async function loadAdmin() {
     pending: pend.docs.map(d => ({ uid: d.id, ...d.data() })),
     active: act.docs.map(d => ({ uid: d.id, ...d.data() })).sort((a, b) => a.email.localeCompare(b.email)),
     allowed: allowed.docs.map(d => d.id).sort(),
+    until: Object.fromEntries(allowed.docs.filter(d => d.data().until).map(d => [d.id, tsMs(d.data().until)])),
     hasKey: cfg.exists(),
     mail: mail && mail.exists() ? mail.data() : null,
     mailRules: mail !== null
@@ -511,7 +528,7 @@ function viewAdmin() {
       ${A.pending.length ? `<div class="list">${A.pending.map(u => `<div class="row"><span class="name">${esc(u.email)}</span><span class="meta"><button class="btn sm primary" data-a="approve" data-uid="${u.uid}" data-em="${esc(u.email)}">Liberar</button><button class="btn sm danger" data-a="deny" data-uid="${u.uid}">Recusar</button></span></div>`).join("")}</div>` : `<p class="small muted" style="margin:0">Nenhum pedido esperando.</p>`}
     </div>
     <div class="card"><div class="hrow spread"><b>Assinantes com acesso</b><span class="pill ok">${A.active.length}</span></div>
-      <div class="list">${A.active.map(u => `<div class="row"><span class="name">${esc(u.email)}</span><span class="meta">${u.email === ADMIN_EMAIL ? `<span class="pill brass">você</span>` : `<button class="btn sm danger" data-a="revoke" data-uid="${u.uid}" data-em="${esc(u.email)}">Tirar acesso</button>`}</span></div>`).join("") || `<p class="small muted" style="margin:0">Ninguém ainda.</p>`}</div>
+      <div class="list">${A.active.map(u => `<div class="row"><span class="name">${esc(u.email)}${A.until[u.email] ? `<br><span class="small ${A.until[u.email] < Date.now() ? "" : "muted"}" style="${A.until[u.email] < Date.now() ? "color:var(--bad)" : ""}">${A.until[u.email] < Date.now() ? "prazo encerrado em " : "acesso até "}${fmtDate(A.until[u.email])}</span>` : ""}</span><span class="meta">${u.email === ADMIN_EMAIL ? `<span class="pill brass">você</span>` : `<button class="btn sm danger" data-a="revoke" data-uid="${u.uid}" data-em="${esc(u.email)}">Tirar acesso</button>`}</span></div>`).join("") || `<p class="small muted" style="margin:0">Ninguém ainda.</p>`}</div>
     </div>
     <div class="card"><b>E-mail de aviso ao liberar</b>
       ${A.mail && A.mail.url ? `<p class="small muted" style="margin:0">Ligado. Quando você toca em Liberar, a pessoa recebe um e-mail avisando que o acesso foi liberado.</p>` : `<p class="small muted" style="margin:0">${A.mailRules ? "Ainda não está ligado. Cole o endereço do script do Google e a chave." : "Antes, atualize as regras do Firestore no console do Firebase (bloco private)."}</p>`}
@@ -524,8 +541,10 @@ function viewAdmin() {
     <div class="card"><b>E-mails autorizados</b>
       <p class="small muted" style="margin:0">Cole aqui os e-mails das assinantes do Trio, um por linha. Quem estiver nesta lista entra direto, sem esperar.</p>
       <textarea class="field" id="emails" rows="4" placeholder="maria@exemplo.com"></textarea>
+      <label for="untilNew">Acesso até (só para quem assina o Piano; deixe vazio para assinantes do Trio)</label><input class="field" id="untilNew" type="date">
       <button class="btn" data-a="addemails">Adicionar à lista</button>
-      <details><summary class="small muted">Ver lista (${A.allowed.length})</summary><div class="list" style="margin-top:8px">${A.allowed.map(e => `<div class="row"><span class="name small">${esc(e)}</span><button class="btn sm ghost" data-a="rmallowed" data-em="${esc(e)}">Remover</button></div>`).join("")}</div></details>
+      <details><summary class="small muted">Ver lista (${A.allowed.length})</summary><div class="list" style="margin-top:8px">${A.allowed.map(e => `<div class="row"><span class="name small">${esc(e)}<br><span class="small muted">Acesso até</span> <input type="date" class="field" style="padding:4px 8px;width:auto;display:inline-block" data-until-em="${esc(e)}" value="${A.until[e] ? new Date(A.until[e]).toISOString().slice(0, 10) : ""}" aria-label="Acesso até para ${esc(e)}"></span><button class="btn sm ghost" data-a="rmallowed" data-em="${esc(e)}">Remover</button></div>`).join("")}</div>
+      <p class="small muted" style="margin:0">Data vazia = sem prazo (assinante do Trio). Com data, o app fecha sozinho para a pessoa depois desse dia e mostra o convite para passar para o Trio.</p></details>
     </div>
     <div class="card"><div class="hrow spread"><b>Músicas</b><button class="btn sm primary" data-a="newsong">Nova música</button></div>
       <div class="list">${S.songs.map(s => `<div class="row"><span class="name">${esc(s.name)}  ${fmtPill(s)}<br><span class="small muted">${s.keys.map(k => esc(k.key)).join(" / ")}${s.bpm ? "  ·  BPM " + esc(s.bpm) : ""}</span></span><span class="meta"><button class="btn sm" data-a="editsong" data-id="${s.id}">Editar</button></span></div>`).join("") || `<p class="small muted" style="margin:0">Nenhuma música cadastrada.</p>`}</div>
@@ -754,12 +773,12 @@ document.addEventListener("click", async e => {
     else if (a === "notif") { const r = await Notification.requestPermission(); toast(r === "granted" ? "Pronto. Com o app aberto ou em segundo plano, você recebe o aviso." : "Os avisos não foram autorizados neste aparelho."); render(); }
     else if (a === "adminreload") { S.adminData = null; render(); }
     else if (a === "mkkey") { const k = crypto.getRandomValues(new Uint8Array(32)); await setDoc(doc(db, "config", "offline"), { k: b64.to(k), createdAt: serverTimestamp() }); toast("Modo offline ativado."); S.adminData = null; render(); }
-    else if (a === "approve") { const em = el.dataset.em; await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); await updateDoc(doc(db, "users", el.dataset.uid), { status: "active", activatedAt: serverTimestamp() }); const mailed = await sendWelcome(em); toast("Acesso liberado para " + em + (mailed ? ". E-mail de aviso enviado." : ". Sem e-mail de aviso: avise a pessoa você mesma.")); S.adminData = null; render(); }
+    else if (a === "approve") { const em = el.dataset.em; await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }, { merge: true }); await updateDoc(doc(db, "users", el.dataset.uid), { status: "active", activatedAt: serverTimestamp() }); const mailed = await sendWelcome(em); toast("Acesso liberado para " + em + (mailed ? ". E-mail de aviso enviado." : ". Sem e-mail de aviso: avise a pessoa você mesma.")); S.adminData = null; render(); }
     else if (a === "savemail") { const url = $("mailurl").value.trim(), k = $("mailkey").value.trim(); if (!/^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/.+\/exec$/.test(url)) return toast("O endereço precisa começar com https://script.google.com e terminar com /exec."); if (!k) return toast("Cole a chave."); try { await setDoc(doc(db, "private", "mail"), { url, k, savedAt: serverTimestamp() }); toast("Salvo. O e-mail de aviso está ligado."); } catch (e) { toast("Não salvou. Confira se as regras do Firestore foram atualizadas."); } S.adminData = null; render(); }
     else if (a === "testmail") { const ok = await sendWelcome(ADMIN_EMAIL); toast(ok ? "Teste enviado. Confira sua caixa de entrada." : "Não deu para enviar o teste."); }
     else if (a === "deny") { await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Pedido recusado."); S.adminData = null; render(); }
     else if (a === "revoke") { const em = el.dataset.em; await deleteDoc(doc(db, "allowed", em)).catch(() => {}); await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Acesso retirado de " + em + ". O conteúdo salvo some na próxima conexão dela."); S.adminData = null; render(); }
-    else if (a === "addemails") { const list = [...new Set(($("emails").value.match(/[^\s,;<>]+@[^\s,;<>]+\.[^\s,;<>]+/g) || []).map(x => x.toLowerCase()))]; if (!list.length) return toast("Nenhum e-mail encontrado no texto."); for (const em of list) await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); toast(list.length + (list.length === 1 ? " e-mail adicionado." : " e-mails adicionados.")); S.adminData = null; render(); }
+    else if (a === "addemails") { const list = [...new Set(($("emails").value.match(/[^\s,;<>]+@[^\s,;<>]+\.[^\s,;<>]+/g) || []).map(x => x.toLowerCase()))]; if (!list.length) return toast("Nenhum e-mail encontrado no texto."); const uv = $("untilNew").value; const until = uv ? new Date(uv + "T23:59:59-03:00") : null; for (const em of list) await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp(), until }); toast(list.length + (list.length === 1 ? " e-mail adicionado" : " e-mails adicionados") + (until ? ", com acesso até " + fmtDate(+until) + "." : ", sem prazo.")); S.adminData = null; render(); }
     else if (a === "rmallowed") { await deleteDoc(doc(db, "allowed", el.dataset.em)); S.adminData = null; render(); }
     else if (a === "newsong") { adminForm = { name: "", formacao: "trio", bpm: "", letra: null, keys: [{ key: "", video: null, sheets: [] }, { key: "", video: null, sheets: [] }] }; render(); window.scrollTo(0, 0); }
     else if (a === "editsong") { const s = byId(el.dataset.id); adminForm = JSON.parse(JSON.stringify({ id: s.id, name: s.name, formacao: fmtOf(s), bpm: s.bpm, letra: s.letra, keys: s.keys })); render(); window.scrollTo(0, 0); }
@@ -817,6 +836,13 @@ document.addEventListener("submit", async e => {
       toast("Playlist " + name + " criada."); if (f.id === "newPl") { S.plId = r.id; S.view = "playlist"; render(); }
     } else if (f.id === "songForm") await submitSong();
   } catch (err) { console.warn(err); toast(AUTH_ERR[err.code] || "Algo deu errado: " + (err.code || err.message)); }
+});
+document.addEventListener("change", async e => {
+  const em = e.target.dataset && e.target.dataset.untilEm;
+  if (!em || !S.isAdmin) return;
+  const v = e.target.value; const until = v ? new Date(v + "T23:59:59-03:00") : null;
+  try { await setDoc(doc(db, "allowed", em), { until }, { merge: true }); toast(until ? "Acesso de " + em + " até " + fmtDate(+until) + "." : "Prazo removido de " + em + "."); S.adminData = null; render(); }
+  catch (err) { toast("Não salvou o prazo: " + (err.code || err.message)); }
 });
 document.addEventListener("input", e => {
   if (e.target.id === "q") { S.query = e.target.value; const pos = e.target.selectionStart; render(); const q = $("q"); if (q) { q.focus(); try { q.setSelectionRange(pos, pos); } catch (_) {} } }

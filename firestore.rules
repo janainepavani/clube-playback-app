@@ -9,12 +9,21 @@ service cloud.firestore {
         && request.auth.token.email == 'janaine@janainepavani.com'
         && request.auth.token.email_verified == true;
     }
+    function allowedPath() { return /databases/$(database)/documents/allowed/$(myEmail()); }
+    // prazo de acesso (ex.: assinante do Piano experimentando): sem "until" ou "until" vazio = sem prazo
+    function untilOk() {
+      return !exists(allowedPath())
+        || !('until' in get(allowedPath()).data)
+        || get(allowedPath()).data.until == null
+        || get(allowedPath()).data.until > request.time;
+    }
     function isAllowed() {
-      return exists(/databases/$(database)/documents/allowed/$(myEmail()));
+      return exists(allowedPath()) && untilOk();
     }
     function isActive() {
       return signedIn()
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active'
+        && untilOk();
     }
 
     // Lista de e-mails autorizados (assinantes do Trio)

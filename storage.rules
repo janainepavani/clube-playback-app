@@ -6,9 +6,20 @@ service firebase.storage {
         && request.auth.token.email == 'janaine@janainepavani.com'
         && request.auth.token.email_verified == true;
     }
+    function allowedDoc() {
+      return /databases/(default)/documents/allowed/$(request.auth.token.email.lower());
+    }
+    // prazo de acesso: sem "until" ou "until" vazio = sem prazo
+    function untilOk() {
+      return !firestore.exists(allowedDoc())
+        || !('until' in firestore.get(allowedDoc()).data)
+        || firestore.get(allowedDoc()).data.until == null
+        || firestore.get(allowedDoc()).data.until > request.time;
+    }
     function isActive() {
       return request.auth != null
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.status == 'active';
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.status == 'active'
+        && untilOk();
     }
 
     // Vídeos, letras e partituras: só assinante ativa lê, só a Janaine envia

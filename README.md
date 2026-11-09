@@ -12,7 +12,7 @@ Web app instalável (PWA) para assinantes do Trio Playback: vídeo com letra (ly
 - **Aviso de liberação:** ao tocar em Liberar, o app chama um script do Google (Apps Script, na conta janaine@janainepavani.com) que envia o e-mail de boas-vindas. Endereço do script e chave ficam em `private/mail` (só a Janaine lê). O código do script está em `apps-script-email.gs` (a chave real fica só no script e no painel).
 
 ## Dados (Firestore)
-- `allowed/{email}`
+- `allowed/{email}`: addedAt, until (opcional: prazo de acesso, usado para assinantes do Piano experimentando o app; vazio = sem prazo). Depois do prazo o app fecha e mostra o convite para o Trio com o cupom PIANOTRIO; as regras do Firestore e do Storage também bloqueiam.
 - `users/{uid}`: email, status (`active` | `pending` | `blocked`), activatedAt, prefKeys
 - `users/{uid}/playlists/{id}`: name, items (ids das músicas)
 - `songs/{id}`: name, formacao (`trio` | `piano`; sem o campo = trio), bpm, letra (caminho), keys [{key, video, sheets}]. A mesma música pode existir nas duas formações (id da versão Piano termina em `-piano`). O catálogo mostra um selo Trio/Piano e um filtro Todas/Trio/Piano.
