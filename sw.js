@@ -1,7 +1,7 @@
 // Guarda o "esqueleto" do app para ele abrir sem internet.
 // Com internet, busca sempre a versão mais nova; sem internet, usa a guardada.
 // Vídeos, letras e partituras ficam no armazenamento criptografado do app, não aqui.
-const CACHE = "clube-app-v7";
+const CACHE = "clube-app-v8";
 const SDK = "https://www.gstatic.com/firebasejs/10.14.1/";
 const SHELL = [
   "./", "./index.html", "./app.js", "./firebase-config.js", "./manifest.webmanifest",

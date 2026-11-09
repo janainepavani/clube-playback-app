@@ -30,7 +30,7 @@ const storage = getStorage(app);
 /* ---------------- estado ---------------- */
 const S = {
   user: null, profile: null, isAdmin: false, profileFromServer: false,
-  songs: [], playlists: [], view: "catalog", songId: null, tab: "video", showKeys: false, addTo: false,
+  songs: [], playlists: [], filter: "all", view: "catalog", songId: null, tab: "video", showKeys: false, addTo: false,
   plId: null, query: "", saved: new Set(), adminData: null, busy: {}
 };
 let unsub = [];
@@ -201,7 +201,7 @@ function startData() {
     }, e => console.warn(e)));
   }
   unsub.push(onSnapshot(query(collection(db, "songs"), orderBy("name")), s => {
-    S.songs = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => norm(a.name).localeCompare(norm(b.name)));
+    S.songs = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => norm(a.name).localeCompare(norm(b.name)) || fmtOf(a).localeCompare(fmtOf(b)) * -1);
     render();
   }, e => console.warn(e)));
   unsub.push(onSnapshot(collection(db, "users", S.user.uid, "playlists"), s => {
@@ -311,12 +311,19 @@ function viewExpired() {
     <p class="muted">Faz mais de ${CHECK_EVERY_DAYS} dias que o app não confirma sua assinatura. Conecte o aparelho à internet por um instante e tudo volta a funcionar, inclusive offline.</p></div>`;
 }
 
+// Formação de cada música: "trio" (padrão) ou "piano". Mesma música pode existir nas duas.
+const fmtOf = s => (s && s.formacao === "piano") ? "piano" : "trio";
+const FMT = { trio: "Trio", piano: "Piano" };
+const fmtPill = s => `<span class="pill ${fmtOf(s) === "trio" ? "fmt-trio" : "fmt-piano"}">${FMT[fmtOf(s)]}</span>`;
+
 function viewCatalog() {
   const q = norm(S.query);
-  const list = S.songs.filter(s => norm(s.name).includes(q));
+  const list = S.songs.filter(s => norm(s.name).includes(q) && (S.filter === "all" || fmtOf(s) === S.filter));
+  const count = f => S.songs.filter(s => fmtOf(s) === f).length;
   let html = `<h1 class="title">Trio Playback</h1>
     <p class="muted small" style="margin:4px 0 0">${S.songs.length} músicas${S.saved.size ? "  ·  " + S.saved.size + " tons salvos no aparelho" : ""}</p>
-    <input class="search" id="q" type="search" placeholder="Buscar música" aria-label="Buscar música" value="${esc(S.query)}">`;
+    <input class="search" id="q" type="search" placeholder="Buscar música" aria-label="Buscar música" value="${esc(S.query)}">
+    ${S.songs.length ? `<div class="tabs" role="tablist" style="margin-top:10px">${[["all", "Todas", S.songs.length], ["trio", "Trio", count("trio")], ["piano", "Piano", count("piano")]].map(([v, l, n]) => `<button role="tab" aria-selected="${S.filter === v}" data-a="filter" data-f="${v}">${l} (${n})</button>`).join("")}</div>` : ""}`;
   if (!navigator.onLine) html += `<p class="note">Sem internet: só as músicas salvas no aparelho tocam.</p>`;
   if (!S.songs.length) html += `<p class="muted">${S.isAdmin ? "Nenhuma música ainda. Abra o Painel da Janaine, na aba Conta, para cadastrar a primeira." : "As músicas estão chegando. Volte em breve."}</p>`;
   let last = "";
@@ -325,9 +332,10 @@ function viewCatalog() {
     if (L !== last) { if (last) html += `</div>`; html += `<div class="letter">${L}</div><div class="list">`; last = L; }
     const k = keyOf(s); const off = S.saved.has(s.id + "|" + k);
     html += `<button class="row ${available(s.id) ? "" : "locked"}" data-a="open" data-id="${s.id}"><span class="name">${esc(s.name)}</span>
-      <span class="meta">${off ? `<span class="pill ok">Offline</span>` : ""}<span class="pill brass">${esc(k)}</span></span></button>`;
+      <span class="meta">${fmtPill(s)}${off ? `<span class="pill ok">Offline</span>` : ""}<span class="pill brass">${esc(k)}</span></span></button>`;
   });
   if (last) html += `</div>`;
+  if (S.songs.length && !list.length) html += `<p class="muted">Nenhuma música encontrada${S.filter !== "all" ? " em " + FMT[S.filter] : ""}.</p>`;
   return html;
 }
 
@@ -337,7 +345,7 @@ function viewSong() {
   const busy = S.busy[offId];
   return `<button class="link" data-a="nav" data-v="catalog">Voltar às músicas</button>
   <div class="stack" style="margin-top:12px">
-    <div><h1 class="title">${esc(s.name)}</h1><p class="muted small" style="margin:4px 0 0">${s.bpm ? "BPM " + esc(s.bpm) + "  ·  " : ""}${s.keys.length} tons</p></div>
+    <div><h1 class="title">${esc(s.name)}</h1><p class="muted small" style="margin:6px 0 0">${fmtPill(s)}  ${s.bpm ? "BPM " + esc(s.bpm) + "  ·  " : ""}${s.keys.length} tons</p></div>
     <div class="hrow"><div><div class="small muted">Seu tom</div><div class="keychip">${esc(k)}</div></div>
       ${s.keys.length > 1 ? `<button class="link" data-a="showkeys">${S.showKeys ? "Fechar" : "Trocar tom"}</button>` : ""}</div>
     ${S.showKeys ? `<div class="hrow">${s.keys.map(x => `<button class="btn sm ${x.key === k ? "primary" : ""}" data-a="setkey" data-k="${esc(x.key)}">${esc(x.key)}</button>`).join("")}</div>
@@ -444,7 +452,7 @@ function viewPlaylist() {
     <button class="btn primary" data-a="present" ${items.length ? "" : "disabled"}>Iniciar modo apresentação</button>
     ${canOffline() && items.length ? (missing.length ? `<button class="btn" data-a="savepl" ${navigator.onLine ? "" : "disabled"}>Salvar a playlist no aparelho (${missing.length} ${missing.length === 1 ? "música" : "músicas"})</button>` : `<p class="note">Toda a playlist está salva no aparelho. Pode tocar sem internet.</p>`) : ""}
     <div class="list">${items.map((id, i) => { const s = byId(id); const k = keyOf(s); return `<div class="row ${available(id) ? "" : "locked"}">
-      <span class="order">${i + 1}</span><span class="name">${esc(s.name)}<br><span class="small muted">tom ${esc(k)}${S.saved.has(id + "|" + k) ? "  ·  offline" : ""}</span></span>
+      <span class="order">${i + 1}</span><span class="name">${esc(s.name)}<br><span class="small muted">${FMT[fmtOf(s)]}  ·  tom ${esc(k)}${S.saved.has(id + "|" + k) ? "  ·  offline" : ""}</span></span>
       <span class="meta"><button class="btn sm ghost" data-a="mv" data-i="${i}" data-d="-1" ${i === 0 ? "disabled" : ""}>Subir</button><button class="btn sm ghost" data-a="mv" data-i="${i}" data-d="1" ${i === items.length - 1 ? "disabled" : ""}>Descer</button><button class="btn sm ghost" data-a="rm" data-i="${i}">Tirar</button></span></div>`; }).join("")}</div>
     ${items.length ? "" : `<p class="muted">Playlist vazia. Abra uma música e escolha Adicionar a uma playlist.</p>`}
   </div>`;
@@ -520,7 +528,7 @@ function viewAdmin() {
       <details><summary class="small muted">Ver lista (${A.allowed.length})</summary><div class="list" style="margin-top:8px">${A.allowed.map(e => `<div class="row"><span class="name small">${esc(e)}</span><button class="btn sm ghost" data-a="rmallowed" data-em="${esc(e)}">Remover</button></div>`).join("")}</div></details>
     </div>
     <div class="card"><div class="hrow spread"><b>Músicas</b><button class="btn sm primary" data-a="newsong">Nova música</button></div>
-      <div class="list">${S.songs.map(s => `<div class="row"><span class="name">${esc(s.name)}<br><span class="small muted">${s.keys.map(k => esc(k.key)).join(" / ")}${s.bpm ? "  ·  BPM " + esc(s.bpm) : ""}</span></span><span class="meta"><button class="btn sm" data-a="editsong" data-id="${s.id}">Editar</button></span></div>`).join("") || `<p class="small muted" style="margin:0">Nenhuma música cadastrada.</p>`}</div>
+      <div class="list">${S.songs.map(s => `<div class="row"><span class="name">${esc(s.name)}  ${fmtPill(s)}<br><span class="small muted">${s.keys.map(k => esc(k.key)).join(" / ")}${s.bpm ? "  ·  BPM " + esc(s.bpm) : ""}</span></span><span class="meta"><button class="btn sm" data-a="editsong" data-id="${s.id}">Editar</button></span></div>`).join("") || `<p class="small muted" style="margin:0">Nenhuma música cadastrada.</p>`}</div>
     </div>
   </div>`;
 }
@@ -531,6 +539,9 @@ function viewSongForm() {
     <h1 class="title">${f.id ? "Editar música" : "Nova música"}</h1>
     <div class="card">
       <label for="sName">Nome da música</label><input class="field" id="sName" value="${esc(f.name)}" required ${f.id ? "readonly" : ""}>
+      <b class="small">Formação</b>
+      <div class="tabs" role="radiogroup">${[["trio", "Trio"], ["piano", "Piano"]].map(([v, l]) => `<button type="button" role="radio" aria-selected="${(f.formacao || "trio") === v}" data-a="setfmt" data-f="${v}" ${f.id ? "disabled" : ""}>${l}</button>`).join("")}</div>
+      ${f.id ? "" : `<p class="small muted" style="margin:0">Se a música existe no Trio e no Piano, cadastre duas vezes, uma com cada formação.</p>`}
       <label for="sBpm">BPM</label><input class="field" id="sBpm" inputmode="numeric" value="${esc(f.bpm || "")}">
       <label for="sLetra">Letra (PDF ou imagem)${f.letra ? "  ·  já enviada" : ""}</label><input class="field" id="sLetra" type="file" accept="application/pdf,image/*">
     </div>
@@ -567,8 +578,8 @@ async function submitSong() {
   readForm(); const f = adminForm;
   if (!f.name || f.keys.some(k => !k.key)) return toast("Preencha o nome e as tonalidades.");
   if (f.keys.some(k => !k.video && !k._v)) return toast("Cada tom precisa de um vídeo.");
-  const id = f.id || slug(f.name);
-  if (!f.id && byId(id)) return toast("Já existe uma música com esse nome.");
+  const id = f.id || slug(f.name) + ((f.formacao || "trio") === "piano" ? "-piano" : "");
+  if (!f.id && byId(id)) return toast("Já existe essa música em " + FMT[f.formacao || "trio"] + ".");
   const jobs = [];
   if (f._l) jobs.push(["letra", f._l, `songs/${id}/letra.${(f._l.name.split(".").pop() || "jpg").toLowerCase()}`]);
   f.keys.forEach((k, i) => {
@@ -587,7 +598,7 @@ async function submitSong() {
       else { const i = +tag.slice(1); if (tag[0] === "v") f.keys[i].video = path; else f.keys[i].sheets.push({ label: file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim(), path }); }
     }
     await setDoc(doc(db, "songs", id), {
-      name: f.name, bpm: f.bpm || null, letra: f.letra || null,
+      name: f.name, formacao: f.formacao || "trio", bpm: f.bpm || null, letra: f.letra || null,
       keys: f.keys.map(k => ({ key: k.key, video: k.video, sheets: k.sheets || [] })), updatedAt: serverTimestamp()
     });
     toast("Música salva."); adminForm = null; render();
@@ -622,7 +633,7 @@ function renderPres() {
     <div class="hrow spread"><span class="small muted">${esc(p.name)}  ·  música ${presIdx + 1} de ${items.length}</span>
       <span class="hrow">${L ? "" : `<button class="btn sm" data-a="closepres">Sair</button>`}<button class="btn sm ${L ? "" : "primary"}" data-a="plock" aria-label="${L ? "Destravar a tela" : "Travar a tela"}">${LOCK_SVG(!L)}${L ? "Destravar" : "Travar"}</button></span></div>
     ${L ? `<p class="small muted" style="margin:0">Tela travada: a música não para, não pula e não troca. Você pode olhar a letra e a partitura à vontade.</p>` : `<p class="small muted" style="margin:0">Dê o play e toque em Travar para proteger a música durante a apresentação.</p>`}
-    <div><div class="now">${esc(s.name)}</div><div class="hrow" style="margin-top:8px"><span class="keychip">${esc(k)}</span>${s.bpm ? `<span class="muted">BPM ${esc(s.bpm)}</span>` : ""}
+    <div><div class="now">${esc(s.name)}</div><div class="hrow" style="margin-top:8px"><span class="keychip">${esc(k)}</span>${fmtPill(s)}${s.bpm ? `<span class="muted">BPM ${esc(s.bpm)}</span>` : ""}
       ${!L && s.keys.length > 1 ? `<button class="link" data-a="pkeys">${presKeys ? "Fechar" : "Trocar tom"}</button>` : ""}${presReady ? `<span class="pill ok">Pronta. Toque quando quiser.</span>` : ""}</div>
       ${!L && presKeys ? `<div class="hrow" style="margin-top:8px">${s.keys.map(x => `<button class="btn sm ${x.key === k ? "primary" : ""}" data-a="pkey" data-k="${esc(x.key)}">${esc(x.key)}</button>`).join("")}</div>` : ""}</div>
     <div class="tabs" role="tablist">${[["video", "Vídeo"], ["letra", "Letra"], ["partitura", "Partitura"]].map(([v, l]) => `<button role="tab" aria-selected="${presView === v}" data-a="pview" data-v="${v}">${l}</button>`).join("")}</div>
@@ -712,6 +723,8 @@ document.addEventListener("click", async e => {
     else if (a === "showkeys") { S.showKeys = !S.showKeys; render(); }
     else if (a === "setkey") { const k = el.dataset.k; S.profile.prefKeys = { ...(S.profile.prefKeys || {}), [S.songId]: k }; S.showKeys = false; mountedKey = null; render(); updateDoc(doc(db, "users", S.user.uid), { prefKeys: S.profile.prefKeys }).catch(() => {}); toast("Tom " + k + " fixado para esta música."); }
     else if (a === "addto") { S.addTo = !S.addTo; render(); }
+    else if (a === "filter") { S.filter = el.dataset.f; render(); }
+    else if (a === "setfmt") { readForm(); adminForm.formacao = el.dataset.f; render(); }
     else if (a === "addpl") { const p = getPl(el.dataset.pl); await savePlItems(p, [...(p.items || []), S.songId]); toast("Adicionada à playlist " + p.name + "."); }
     else if (a === "save") { const s = byId(el.dataset.id); saveSong(s, keyOf(s)); }
     else if (a === "unsave") { const s = byId(el.dataset.id); await unsaveSong(s, keyOf(s)); toast("Removida do aparelho."); }
@@ -748,8 +761,8 @@ document.addEventListener("click", async e => {
     else if (a === "revoke") { const em = el.dataset.em; await deleteDoc(doc(db, "allowed", em)).catch(() => {}); await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Acesso retirado de " + em + ". O conteúdo salvo some na próxima conexão dela."); S.adminData = null; render(); }
     else if (a === "addemails") { const list = [...new Set(($("emails").value.match(/[^\s,;<>]+@[^\s,;<>]+\.[^\s,;<>]+/g) || []).map(x => x.toLowerCase()))]; if (!list.length) return toast("Nenhum e-mail encontrado no texto."); for (const em of list) await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); toast(list.length + (list.length === 1 ? " e-mail adicionado." : " e-mails adicionados.")); S.adminData = null; render(); }
     else if (a === "rmallowed") { await deleteDoc(doc(db, "allowed", el.dataset.em)); S.adminData = null; render(); }
-    else if (a === "newsong") { adminForm = { name: "", bpm: "", letra: null, keys: [{ key: "", video: null, sheets: [] }, { key: "", video: null, sheets: [] }] }; render(); window.scrollTo(0, 0); }
-    else if (a === "editsong") { const s = byId(el.dataset.id); adminForm = JSON.parse(JSON.stringify({ id: s.id, name: s.name, bpm: s.bpm, letra: s.letra, keys: s.keys })); render(); window.scrollTo(0, 0); }
+    else if (a === "newsong") { adminForm = { name: "", formacao: "trio", bpm: "", letra: null, keys: [{ key: "", video: null, sheets: [] }, { key: "", video: null, sheets: [] }] }; render(); window.scrollTo(0, 0); }
+    else if (a === "editsong") { const s = byId(el.dataset.id); adminForm = JSON.parse(JSON.stringify({ id: s.id, name: s.name, formacao: fmtOf(s), bpm: s.bpm, letra: s.letra, keys: s.keys })); render(); window.scrollTo(0, 0); }
     else if (a === "rmsheet") { readForm(); adminForm.keys[+el.dataset.i].sheets.splice(+el.dataset.j, 1); render(); }
     else if (a === "sheet") { S.sheetIdx = +el.dataset.i; render(); }
     else if (a === "addkey") { readForm(); adminForm.keys.push({ key: "", video: null, sheets: [] }); render(); }

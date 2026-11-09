@@ -15,7 +15,7 @@ Web app instalável (PWA) para assinantes do Trio Playback: vídeo com letra (ly
 - `allowed/{email}`
 - `users/{uid}`: email, status (`active` | `pending` | `blocked`), activatedAt, prefKeys
 - `users/{uid}/playlists/{id}`: name, items (ids das músicas)
-- `songs/{id}`: name, bpm, letra (caminho), keys [{key, video, sheet}]
+- `songs/{id}`: name, formacao (`trio` | `piano`; sem o campo = trio), bpm, letra (caminho), keys [{key, video, sheets}]. A mesma música pode existir nas duas formações (id da versão Piano termina em `-piano`). O catálogo mostra um selo Trio/Piano e um filtro Todas/Trio/Piano.
 - `config/offline`: k (chave base64)
 - `private/mail`: url, k (script do e-mail de aviso)
 
