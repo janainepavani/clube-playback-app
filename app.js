@@ -37,6 +37,35 @@ let unsub = [];
 const DAY = 86400000;
 const $ = id => document.getElementById(id);
 const main = $("main");
+// E-mail de aviso quando a Janaine libera o acesso (enviado pela extensão Trigger Email do Firebase, coleção "mail")
+const APP_URL = "https://app.playback.janainepavani.com";
+function welcomeMail(to) {
+  const text = `Olá!
+
+Seu acesso ao app do Trio Playback foi liberado.
+
+Para entrar, abra ${APP_URL} e use o mesmo e-mail e a senha que você criou.
+
+Dica: no iPhone, abra o link no Safari, toque em Compartilhar e depois em "Adicionar à Tela de Início". No Android, abra no Chrome e toque em "Instalar app". Assim o app fica no seu celular como qualquer outro.
+
+Se esquecer a senha, toque em "Esqueci minha senha" na tela de entrada.
+
+Qualquer dúvida, é só responder este e-mail ou me chamar no WhatsApp: https://wa.me/5541998771712
+
+Um abraço,
+Janaine Pavani`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#222;max-width:520px">
+<p>Olá!</p>
+<p>Seu acesso ao app do <b>Trio Playback</b> foi liberado.</p>
+<p>Para entrar, use o mesmo e-mail e a senha que você criou:</p>
+<p style="margin:24px 0"><a href="${APP_URL}" style="background:#b8956a;color:#111;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold">Abrir o app</a></p>
+<p><b>Dica:</b> no iPhone, abra o link no Safari, toque em Compartilhar e depois em "Adicionar à Tela de Início". No Android, abra no Chrome e toque em "Instalar app". Assim o app fica no seu celular como qualquer outro.</p>
+<p>Se esquecer a senha, toque em "Esqueci minha senha" na tela de entrada.</p>
+<p>Qualquer dúvida, é só responder este e-mail ou me chamar no <a href="https://wa.me/5541998771712">WhatsApp</a>.</p>
+<p>Um abraço,<br>Janaine Pavani</p>
+</div>`;
+  return { to, createdAt: serverTimestamp(), message: { subject: "Seu acesso ao app do Trio Playback foi liberado", text, html } };
+}
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const slug = s => norm(s).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -720,7 +749,7 @@ document.addEventListener("click", async e => {
     else if (a === "notif") { const r = await Notification.requestPermission(); toast(r === "granted" ? "Pronto. Com o app aberto ou em segundo plano, você recebe o aviso." : "Os avisos não foram autorizados neste aparelho."); render(); }
     else if (a === "adminreload") { S.adminData = null; render(); }
     else if (a === "mkkey") { const k = crypto.getRandomValues(new Uint8Array(32)); await setDoc(doc(db, "config", "offline"), { k: b64.to(k), createdAt: serverTimestamp() }); toast("Modo offline ativado."); S.adminData = null; render(); }
-    else if (a === "approve") { const em = el.dataset.em; await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); await updateDoc(doc(db, "users", el.dataset.uid), { status: "active", activatedAt: serverTimestamp() }); toast("Acesso liberado para " + em + "."); S.adminData = null; render(); }
+    else if (a === "approve") { const em = el.dataset.em; await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); await updateDoc(doc(db, "users", el.dataset.uid), { status: "active", activatedAt: serverTimestamp() }); let mailed = true; try { await addDoc(collection(db, "mail"), welcomeMail(em)); } catch (e) { mailed = false; } toast("Acesso liberado para " + em + (mailed ? ". E-mail de aviso enviado." : ". O e-mail de aviso não foi enviado.")); S.adminData = null; render(); }
     else if (a === "deny") { await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Pedido recusado."); S.adminData = null; render(); }
     else if (a === "revoke") { const em = el.dataset.em; await deleteDoc(doc(db, "allowed", em)).catch(() => {}); await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Acesso retirado de " + em + ". O conteúdo salvo some na próxima conexão dela."); S.adminData = null; render(); }
     else if (a === "addemails") { const list = [...new Set(($("emails").value.match(/[^\s,;<>]+@[^\s,;<>]+\.[^\s,;<>]+/g) || []).map(x => x.toLowerCase()))]; if (!list.length) return toast("Nenhum e-mail encontrado no texto."); for (const em of list) await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }); toast(list.length + (list.length === 1 ? " e-mail adicionado." : " e-mails adicionados.")); S.adminData = null; render(); }

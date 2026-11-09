@@ -57,6 +57,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // E-mails de aviso (lidos e enviados pela extensão Trigger Email)
+    match /mail/{id} {
+      allow create: if isAdmin();
+      allow read, update, delete: if false;
+    }
+
     // Chave do modo offline
     match /config/{doc} {
       allow read: if isActive() || isAdmin();
