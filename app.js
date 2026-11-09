@@ -307,11 +307,22 @@ function viewPending() {
     <p class="small muted" style="margin:0">Se demorar, fale com a Janaine pelo <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">WhatsApp de Janaine Pavani</a>.</p>
     <div class="hrow" style="justify-content:center"><button class="btn" data-a="logout">Sair</button></div></div>`;
 }
+// Aviso quando o acesso está perto de acabar (7 dias antes)
+function untilBanner() {
+  const u = untilMs(); if (S.isAdmin || !u || untilPassed()) return "";
+  const days = Math.ceil((u - Date.now()) / DAY); if (days > 7) return "";
+  return `<div class="card" style="border-color:var(--warn);margin:10px 0">
+    <b>Seu acesso ao app vai até ${fmtDate(u)}${days <= 1 ? " (amanhã ou hoje)" : ", daqui a " + days + " dias"}</b>
+    <p class="small muted" style="margin:0">Se você assina o Trio Playback, confira se o pagamento da sua assinatura está em dia no Eduzz. Se você assina o Piano Playback, passe para o Trio com o seu desconto para continuar usando o app. Suas playlists ficam guardadas.</p>
+    <a class="btn sm primary" style="text-decoration:none;text-align:center" href="${PIANOTRIO_URL}" target="_blank" rel="noopener">Passar do Piano para o Trio</a>
+    <p class="small muted" style="margin:0">Dúvidas: <a href="https://wa.me/${WHATS}" target="_blank" rel="noopener">WhatsApp de Janaine Pavani</a></p>
+  </div>`;
+}
 function viewUntilEnded() {
-  return `<div class="card center stack"><h1 class="title">Seu período no app terminou</h1>
-    <p class="muted">O app é exclusivo de quem assina o Trio Playback. O seu acesso de experiência foi até ${fmtDate(untilMs())}, e as músicas salvas neste aparelho foram apagadas.</p>
-    <p class="muted">Para continuar com o app, passe para o Trio Playback com o desconto de quem já assina o Piano.</p>
-    <a class="btn primary" style="text-decoration:none" href="${PIANOTRIO_URL}" target="_blank" rel="noopener">Passar para o Trio com desconto</a>
+  return `<div class="card center stack"><h1 class="title">Seu acesso ao app terminou</h1>
+    <p class="muted">O seu acesso foi até ${fmtDate(untilMs())}. Suas playlists e os tons que você escolheu continuam guardados e voltam assim que o acesso for liberado de novo. Só as músicas salvas neste aparelho foram apagadas.</p>
+    <p class="muted">Se você assina o Trio Playback, confira o pagamento da sua assinatura no Eduzz e fale com a Janaine. Se você assina o Piano Playback, passe para o Trio com o seu desconto.</p>
+    <a class="btn primary" style="text-decoration:none" href="${PIANOTRIO_URL}" target="_blank" rel="noopener">Passar do Piano para o Trio</a>
     ${CONTACT}
     <div class="hrow" style="justify-content:center"><button class="btn" data-a="logout">Sair</button></div></div>`;
 }
@@ -340,6 +351,7 @@ function viewCatalog() {
     <p class="muted small" style="margin:4px 0 0">${S.songs.length} músicas${S.saved.size ? "  ·  " + S.saved.size + " tons salvos no aparelho" : ""}</p>
     <input class="search" id="q" type="search" placeholder="Buscar música" aria-label="Buscar música" value="${esc(S.query)}">
     ${S.songs.length ? `<div class="tabs" role="tablist" style="margin-top:10px">${[["all", "Todas", S.songs.length], ["trio", "Trio", count("trio")], ["piano", "Piano", count("piano")]].map(([v, l, n]) => `<button role="tab" aria-selected="${S.filter === v}" data-a="filter" data-f="${v}">${l} (${n})</button>`).join("")}</div>` : ""}`;
+  html += untilBanner();
   if (!navigator.onLine) html += `<p class="note">Sem internet: só as músicas salvas no aparelho tocam.</p>`;
   if (!S.songs.length) html += `<p class="muted">${S.isAdmin ? "Nenhuma música ainda. Abra o Painel da Janaine, na aba Conta, para cadastrar a primeira." : "As músicas estão chegando. Volte em breve."}</p>`;
   let last = "";
@@ -478,6 +490,7 @@ async function savePlItems(p, items) { await updateDoc(doc(db, "users", S.user.u
 function viewAccount() {
   const left = Math.max(0, CHECK_EVERY_DAYS - Math.floor((Date.now() - lastCheck()) / DAY));
   return `<h1 class="title">Conta</h1>
+  ${untilBanner()}
   <div class="stack" style="margin-top:14px">
     <div class="card">
       <div class="hrow spread"><b>Trio Playback</b><span class="pill ok">${S.isAdmin ? "Administradora" : "Ativa"}</span></div>
@@ -528,7 +541,7 @@ function viewAdmin() {
       ${A.pending.length ? `<div class="list">${A.pending.map(u => `<div class="row"><span class="name">${esc(u.email)}</span><span class="meta"><button class="btn sm primary" data-a="approve" data-uid="${u.uid}" data-em="${esc(u.email)}">Liberar</button><button class="btn sm danger" data-a="deny" data-uid="${u.uid}">Recusar</button></span></div>`).join("")}</div>` : `<p class="small muted" style="margin:0">Nenhum pedido esperando.</p>`}
     </div>
     <div class="card"><div class="hrow spread"><b>Assinantes com acesso</b><span class="pill ok">${A.active.length}</span></div>
-      <div class="list">${A.active.map(u => `<div class="row"><span class="name">${esc(u.email)}${A.until[u.email] ? `<br><span class="small ${A.until[u.email] < Date.now() ? "" : "muted"}" style="${A.until[u.email] < Date.now() ? "color:var(--bad)" : ""}">${A.until[u.email] < Date.now() ? "prazo encerrado em " : "acesso até "}${fmtDate(A.until[u.email])}</span>` : ""}</span><span class="meta">${u.email === ADMIN_EMAIL ? `<span class="pill brass">você</span>` : `<button class="btn sm danger" data-a="revoke" data-uid="${u.uid}" data-em="${esc(u.email)}">Tirar acesso</button>`}</span></div>`).join("") || `<p class="small muted" style="margin:0">Ninguém ainda.</p>`}</div>
+      <div class="list">${A.active.map(u => `<div class="row"><span class="name">${esc(u.email)}${A.until[u.email] ? `<br><span class="small ${A.until[u.email] < Date.now() ? "" : "muted"}" style="${A.until[u.email] < Date.now() ? "color:var(--bad)" : ""}">${A.until[u.email] < Date.now() ? "prazo encerrado em " : "acesso até "}${fmtDate(A.until[u.email])}</span>` : ""}</span><span class="meta">${u.email === ADMIN_EMAIL ? `<span class="pill brass">você</span>` : `${A.until[u.email] ? `<button class="btn sm ghost" data-a="clearuntil" data-em="${esc(u.email)}">Tirar prazo</button>` : `<button class="btn sm" data-a="warn3" data-em="${esc(u.email)}">Avisar e encerrar em 3 dias</button>`}<button class="btn sm danger" data-a="revoke" data-uid="${u.uid}" data-em="${esc(u.email)}">Tirar agora</button>`}</span></div>`).join("") || `<p class="small muted" style="margin:0">Ninguém ainda.</p>`}</div>
     </div>
     <div class="card"><b>E-mail de aviso ao liberar</b>
       ${A.mail && A.mail.url ? `<p class="small muted" style="margin:0">Ligado. Quando você toca em Liberar, a pessoa recebe um e-mail avisando que o acesso foi liberado.</p>` : `<p class="small muted" style="margin:0">${A.mailRules ? "Ainda não está ligado. Cole o endereço do script do Google e a chave." : "Antes, atualize as regras do Firestore no console do Firebase (bloco private)."}</p>`}
@@ -742,6 +755,8 @@ document.addEventListener("click", async e => {
     else if (a === "showkeys") { S.showKeys = !S.showKeys; render(); }
     else if (a === "setkey") { const k = el.dataset.k; S.profile.prefKeys = { ...(S.profile.prefKeys || {}), [S.songId]: k }; S.showKeys = false; mountedKey = null; render(); updateDoc(doc(db, "users", S.user.uid), { prefKeys: S.profile.prefKeys }).catch(() => {}); toast("Tom " + k + " fixado para esta música."); }
     else if (a === "addto") { S.addTo = !S.addTo; render(); }
+    else if (a === "warn3") { const em = el.dataset.em; const d = new Date(Date.now() + 3 * DAY); d.setHours(23, 59, 59, 0); await setDoc(doc(db, "allowed", em), { until: d }, { merge: true }); toast(em + " vai ver o aviso e o acesso termina em " + fmtDate(+d) + "."); S.adminData = null; render(); }
+    else if (a === "clearuntil") { const em = el.dataset.em; await setDoc(doc(db, "allowed", em), { until: null }, { merge: true }); toast("Prazo removido. " + em + " continua com acesso."); S.adminData = null; render(); }
     else if (a === "filter") { S.filter = el.dataset.f; render(); }
     else if (a === "setfmt") { readForm(); adminForm.formacao = el.dataset.f; render(); }
     else if (a === "addpl") { const p = getPl(el.dataset.pl); await savePlItems(p, [...(p.items || []), S.songId]); toast("Adicionada à playlist " + p.name + "."); }
