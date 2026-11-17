@@ -347,7 +347,7 @@ function viewCatalog() {
   const q = norm(S.query);
   const list = S.songs.filter(s => norm(s.name).includes(q) && (S.filter === "all" || fmtOf(s) === S.filter));
   const count = f => S.songs.filter(s => fmtOf(s) === f).length;
-  let html = `<h1 class="title">Trio Playback</h1>
+  let html = `<h1 class="title">Clube Playback <span style="font-size:.5em;font-weight:500;color:var(--bronze);white-space:nowrap">by Janaine Pavani</span></h1>
     <p class="muted small" style="margin:4px 0 0">${S.songs.length} músicas${S.saved.size ? "  ·  " + S.saved.size + " tons salvos no aparelho" : ""}</p>
     <input class="search" id="q" type="search" placeholder="Buscar música" aria-label="Buscar música" value="${esc(S.query)}">
     ${S.songs.length ? `<div class="tabs" role="tablist" style="margin-top:10px">${[["all", "Todas", S.songs.length], ["trio", "Trio", count("trio")], ["piano", "Piano", count("piano")]].map(([v, l, n]) => `<button role="tab" aria-selected="${S.filter === v}" data-a="filter" data-f="${v}">${l} (${n})</button>`).join("")}</div>` : ""}`;
