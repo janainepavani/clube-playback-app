@@ -233,14 +233,16 @@ function startData() {
         try { if ("Notification" in window && Notification.permission === "granted") new Notification("Trio Playback", { body: "Nova mensagem de " + fresh[0].email, icon: "icon-192.png" }); } catch (e) {}
       }
       firstT = false;
+      S.sup.ready = true;
       if (["account", "admin", "admthread"].includes(S.view) && !adminForm) render(); else updateBadges();
-    }, e => console.warn(e)));
+    }, e => { console.warn(e); S.sup.ready = false; if (S.view === "admin") render(); }));
   } else {
     unsub.push(onSnapshot(doc(db, "support", S.user.uid), s => {
       const was = S.sup.unreadUser; S.sup.unreadUser = !!(s.exists() && s.data().unreadUser);
       if (S.sup.unreadUser && !was && S.view !== "support") toast("A Janaine respondeu sua mensagem. Veja em Conta.");
-      if (was !== S.sup.unreadUser) { if (S.view === "account") render(); else updateBadges(); }
-    }, e => console.warn(e)));
+      const wasOn = S.sup.ready; S.sup.ready = true;
+      if (was !== S.sup.unreadUser || !wasOn) { if (S.view === "account") render(); else updateBadges(); }
+    }, e => { console.warn(e); S.sup.ready = false; }));
   }
   unsub.push(onSnapshot(query(collection(db, "songs"), orderBy("name")), s => {
     S.songs = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => norm(a.name).localeCompare(norm(b.name)) || fmtOf(a).localeCompare(fmtOf(b)) * -1);
@@ -547,7 +549,7 @@ function viewAccount() {
       <p class="small muted" style="margin:0">${S.saved.size} ${S.saved.size === 1 ? "tom salvo" : "tons salvos"} neste aparelho.</p>
       <div class="hrow">${S.saved.size ? `<button class="btn sm" data-a="wipe">Apagar tudo do aparelho</button>` : ""}<button class="btn sm" data-a="logout">Sair</button></div>
     </div>
-    ${S.isAdmin ? "" : `<button class="card" data-a="nav" data-v="support" style="text-align:left;cursor:pointer;color:inherit">
+    ${S.isAdmin || !S.sup.ready ? "" : `<button class="card" data-a="nav" data-v="support" style="text-align:left;cursor:pointer;color:inherit">
       <div class="hrow spread" style="width:100%"><b>Fale com a Janaine</b>${S.sup.unreadUser ? `<span class="pill warn">Resposta nova</span>` : ""}</div>
       <span class="small muted">Dúvidas, sugestões e problemas no app. Pode mandar print da tela.</span></button>`}
     ${(S.user.email || "").toLowerCase() === ADMIN_EMAIL ? (S.isAdmin ? `<button class="btn primary" data-a="nav" data-v="admin">Abrir o Painel da Janaine${S.pendingCount ? "  ·  " + S.pendingCount + (S.pendingCount === 1 ? " pedido novo" : " pedidos novos") : ""}${S.sup.unreadAdmin ? "  ·  " + S.sup.unreadAdmin + (S.sup.unreadAdmin === 1 ? " mensagem nova" : " mensagens novas") : ""}</button>
@@ -698,7 +700,7 @@ function viewAdmin() {
     <div class="hrow spread"><h1 class="title">Painel da Janaine</h1><button class="btn sm" data-a="adminreload">Atualizar</button></div>
     ${A.hasKey ? "" : `<div class="card"><b>Ative o modo offline</b><p class="small muted" style="margin:0">Cria a chave que embaralha os vídeos salvos nos aparelhos. Faça isso uma vez só.</p><button class="btn primary" data-a="mkkey">Ativar modo offline</button></div>`}
     <div class="card"><div class="hrow spread"><b>Mensagens</b><span class="pill ${S.sup.unreadAdmin ? "warn" : ""}">${S.sup.unreadAdmin ? S.sup.unreadAdmin + (S.sup.unreadAdmin === 1 ? " nova" : " novas") : S.sup.threads.length}</span></div>
-      ${S.sup.threads.length ? `<div class="list">${S.sup.threads.map(t => `<button class="row" data-a="openthread" data-uid="${t.uid}" ${t.unreadAdmin ? 'style="border-color:var(--warn)"' : ""}><span class="name">${esc(t.email)}<br><span class="small muted" style="font-weight:500">${t.lastFrom === "admin" ? "Você: " : ""}${esc(t.lastText || "")}</span></span><span class="meta">${t.unreadAdmin ? `<span class="pill warn">nova</span>` : ""}<span class="small muted">${t.lastAt ? fmtWhen(tsMs(t.lastAt)) : ""}</span></span></button>`).join("")}</div>` : `<p class="small muted" style="margin:0">Nenhuma mensagem ainda.</p>`}
+      ${!S.sup.ready ? `<p class="small muted" style="margin:0">Ainda desligado. Cole as regras novas do Firestore e do Storage no console do Firebase. Depois disso, o quadro Fale com a Janaine aparece para as assinantes sozinho.</p>` : S.sup.threads.length ? `<div class="list">${S.sup.threads.map(t => `<button class="row" data-a="openthread" data-uid="${t.uid}" ${t.unreadAdmin ? 'style="border-color:var(--warn)"' : ""}><span class="name">${esc(t.email)}<br><span class="small muted" style="font-weight:500">${t.lastFrom === "admin" ? "Você: " : ""}${esc(t.lastText || "")}</span></span><span class="meta">${t.unreadAdmin ? `<span class="pill warn">nova</span>` : ""}<span class="small muted">${t.lastAt ? fmtWhen(tsMs(t.lastAt)) : ""}</span></span></button>`).join("")}</div>` : `<p class="small muted" style="margin:0">Nenhuma mensagem ainda.</p>`}
     </div>
     <div class="card"><div class="hrow spread"><b>Pedidos de acesso</b><span class="pill ${A.pending.length ? "warn" : ""}">${A.pending.length}</span></div>
       ${A.pending.length ? `<div class="list">${A.pending.map(u => `<div class="row"><span class="name">${esc(u.email)}</span><span class="meta"><button class="btn sm primary" data-a="approve" data-uid="${u.uid}" data-em="${esc(u.email)}">Liberar</button><button class="btn sm danger" data-a="deny" data-uid="${u.uid}">Recusar</button></span></div>`).join("")}</div>` : `<p class="small muted" style="margin:0">Nenhum pedido esperando.</p>`}
