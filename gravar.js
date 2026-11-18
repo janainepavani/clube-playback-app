@@ -255,6 +255,40 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     await listDevices();
     if (!closed) showRecord();
   }
+  // explica, conforme o erro e o aparelho, o que fazer quando a câmera não abre
+  function camHelp(e) {
+    const ua = navigator.userAgent || "";
+    const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    const android = /Android/.test(ua);
+    const inApp = /Instagram|FBAN|FBAV|WhatsApp|Line\//.test(ua);
+    const name = (e && e.name) || "";
+    const box2 = (title, items) => `<div class="card" style="width:100%;gap:8px;border-color:var(--warn);text-align:left"><b>${title}</b><ol class="small" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">${items.map(i => `<li>${i}</li>`).join("")}</ol><p class="small muted" style="margin:0">Depois, toque em Tentar de novo. Se continuar, mande um print para a Janaine.</p></div>`;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || inApp)
+      return box2("Este navegador não deixa gravar", [
+        "Parece que o app abriu dentro de outro aplicativo (como o WhatsApp ou o Instagram), ou num navegador sem acesso à câmera.",
+        ios ? "Abra o Safari e digite app.playback.janainepavani.com, ou abra pelo ícone do Clube Playback na tela de início." : "Abra o Chrome e digite app.playback.janainepavani.com, ou abra pelo ícone do Clube Playback na tela de início."]);
+    if (name === "NotReadableError" || name === "AbortError" || name === "TrackStartError")
+      return box2("A câmera ou o microfone estão ocupados", [
+        "Outro aplicativo está usando a câmera ou o microfone (por exemplo, uma chamada de vídeo, o WhatsApp, o Instagram ou a câmera do celular).",
+        "Feche esse aplicativo e volte aqui."]);
+    if (name === "NotFoundError" || name === "OverconstrainedError" || name === "DevicesNotFoundError")
+      return box2("Não encontrei câmera ou microfone", [
+        "Confira se a câmera e o microfone estão conectados (no computador, a webcam ou a interface de áudio).",
+        "Se usar fone com microfone, tente tirar e colocar de novo."]);
+    // permissão negada (o mais comum)
+    if (ios) return box2("O iPhone bloqueou a câmera ou o microfone", [
+      "Se aparecer <b>Privado</b> ao lado do endereço, lá embaixo, saia do modo privado: toque no botão de abas (os dois quadradinhos), escolha uma aba normal e abra o app nela. No modo privado o iPhone bloqueia a câmera.",
+      "Abra os <b>Ajustes</b> do iPhone, vá em <b>Apps</b> e depois em <b>Safari</b> (em iPhones mais antigos, Safari aparece direto na lista).",
+      "Desça até <b>Ajustes para Sites</b> e coloque <b>Câmera</b> e <b>Microfone</b> em Permitir ou Perguntar.",
+      "Feche o app de vez (arraste para cima) e abra de novo. Quando perguntar, toque em Permitir."]);
+    if (android) return box2("O celular bloqueou a câmera ou o microfone", [
+      "Toque no cadeado (ou no ícone de ajustes) ao lado do endereço, lá em cima, e depois em Permissões.",
+      "Libere <b>Câmera</b> e <b>Microfone</b>.",
+      "Se abriu pelo ícone na tela de início: abra o Chrome, vá em Configurações, Configurações do site, Câmera e Microfone, e libere app.playback.janainepavani.com."]);
+    return box2("O navegador bloqueou a câmera ou o microfone", [
+      "Clique no cadeado (ou no ícone de câmera) ao lado do endereço, lá em cima, e permita Câmera e Microfone.",
+      "No Mac, confira também em Ajustes do Sistema, Privacidade e Segurança, Câmera e Microfone, se o navegador está liberado."]);
+  }
   async function startCam() {
     const btn = box.querySelector("#stOn"); btn.disabled = true; btn.textContent = "Ligando...";
     try {
@@ -263,7 +297,8 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       await openCam();
     } catch (e) {
       console.warn(e); btn.disabled = false; btn.textContent = "Tentar de novo";
-      toast("Não consegui abrir a câmera e o microfone. Permita o acesso nas configurações do aparelho.");
+      const camBox = box.querySelector("#stCam"); if (camBox) camBox.innerHTML = camHelp(e);
+      camBox && camBox.scrollIntoView({ block: "center" });
       return;
     }
     if (closed) return stopCam();
