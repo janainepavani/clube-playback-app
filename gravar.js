@@ -60,6 +60,36 @@ function envelope(buf) {
   return out;
 }
 
+// ---------- reverb na voz (sala sintética, sem arquivos extras) ----------
+const REVERB = {
+  0: null,
+  1: { label: "Leve", wet: 0.16, secs: 1.6 },
+  2: { label: "Médio", wet: 0.28, secs: 2.2 },
+  3: { label: "Mais", wet: 0.42, secs: 2.8 }
+};
+const irCache = {};
+function reverbIR(level) {
+  if (irCache[level]) return irCache[level];
+  const SR = 48000, n = Math.round(REVERB[level].secs * SR);
+  const buf = new AudioBuffer({ length: n, numberOfChannels: 2, sampleRate: SR });
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3.2);
+  }
+  return (irCache[level] = buf);
+}
+// liga a voz (gV) na saída (dest) passando pelo reverb: pré-atraso, convolução e filtros para não embolar
+function addReverb(ac, gV, dest, level) {
+  const r = REVERB[level]; if (!r) return null;
+  const pre = ac.createDelay(0.1); pre.delayTime.value = 0.02;
+  const hp = ac.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 220;
+  const lp = ac.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 6500;
+  const conv = ac.createConvolver(); conv.normalize = true; conv.buffer = reverbIR(level);
+  const wet = ac.createGain(); wet.gain.value = r.wet;
+  gV.connect(pre); pre.connect(hp); hp.connect(lp); lp.connect(conv); conv.connect(wet); wet.connect(dest);
+  return wet;
+}
+
 const CSS = `
 .st{position:fixed;inset:0;z-index:30;background:#060505;color:var(--cream);overflow:auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
 .st-in{max-width:960px;margin:0 auto;padding:14px 16px 30px;display:flex;flex-direction:column;gap:14px}
@@ -135,6 +165,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   const isMirror = () => { const v = camStream && camStream.getVideoTracks()[0]; const f = v && v.getSettings().facingMode; return f ? f === "user" : facing === "user" && !camId; };
   const vol = Object.assign({ v: 1, p: 0.8 }, (() => { try { return JSON.parse(lsGet(LS_VOL) || "{}"); } catch (e) { return {}; } })());
   let fix = +(lsGet(LS_FIX) || 0); // correção manual guardada
+  let rev = +(lsGet("cp-rec-rev") || 0); // reverb na voz: 0 sem, 1 leve, 2 médio, 3 mais
 
   async function keepAwake() { try { if ("wakeLock" in navigator) wake = await navigator.wakeLock.request("screen"); } catch (e) {} }
   function stopCam() { if (camStream) camStream.getTracks().forEach(t => t.stop()); camStream = null; }
@@ -381,12 +412,13 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
         </div>
         <div class="nudges"><button class="btn sm ghost" id="stMarkA">Cortar início aqui</button><button class="btn sm ghost" id="stMarkB">Cortar fim aqui</button><button class="btn sm ghost" id="stTrimReset">Desfazer corte</button></div>
         <button class="btn primary" id="stFinal" style="padding:13px">Assistir à prévia do vídeo final</button>
-        <p class="small muted" style="margin:0;text-align:center">A prévia já sai com o corte, o volume, a sincronia e os fades, do jeito que vai ficar.</p>
+        <p class="small muted" style="margin:0;text-align:center">A prévia já sai com o corte, o volume, o reverb, a sincronia e os fades, do jeito que vai ficar.</p>
       </div>
       <div class="card">
         <b>Volume</b>
         <div class="mixrow"><label for="stVv">Sua voz</label><input type="range" id="stVv" min="0" max="2" step="0.01" value="${vol.v}"><output id="stVvO"></output></div>
         <div class="mixrow"><label for="stVp">Playback</label><input type="range" id="stVp" min="0" max="2" step="0.01" value="${vol.p}"><output id="stVpO"></output></div>
+        <div class="mixrow"><label for="stRev">Reverb na voz</label><select class="field" id="stRev" style="padding:6px 10px">${[0, 1, 2, 3].map(x => `<option value="${x}" ${x === rev ? "selected" : ""}>${x ? REVERB[x].label : "Sem reverb"}</option>`).join("")}</select><span></span></div>
       </div>
       <div class="card">
         <b>Fade</b>
@@ -469,6 +501,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       } catch (e) {}
       v.remove();
     })();
+    box.querySelector("#stRev").onchange = e => { rev = +e.target.value; lsSet("cp-rec-rev", String(rev)); if (preview) startPreview(currentPos()); };
     const saveFade = () => lsSet("cp-rec-fade", JSON.stringify(fade));
     box.querySelector("#stFi").onchange = e => { fade.i = +e.target.value; saveFade(); };
     box.querySelector("#stFo").onchange = e => { fade.o = +e.target.value; saveFade(); };
@@ -526,7 +559,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       stopPreview(); const c = audioCtx(); pos = Math.max(0, Math.min(pos, trimB - 0.05)); playPos = pos;
       const gM = c.createGain(); gM.connect(c.destination);
       const gV = c.createGain(), gP = c.createGain(); gV.gain.value = vol.v; gP.gain.value = vol.p;
-      gV.connect(gM); gP.connect(gM);
+      gV.connect(gM); gP.connect(gM); addReverb(c, gV, gM, rev);
       const srcV = c.createBufferSource(); srcV.buffer = voiceBuf; srcV.connect(gV);
       const srcP = c.createBufferSource(); srcP.buffer = pbBuf; srcP.connect(gP);
       const when = c.currentTime + 0.08;
@@ -602,7 +635,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       const gM = oc.createGain(); gM.connect(oc.destination);
       gM.gain.setValueAtTime(fi ? 0 : 1, 0); if (fi) gM.gain.linearRampToValueAtTime(1, fi);
       if (fo) { gM.gain.setValueAtTime(1, len - fo); gM.gain.linearRampToValueAtTime(0, len); }
-      const gV = oc.createGain(), gP = oc.createGain(); gV.gain.value = vol.v; gP.gain.value = vol.p; gV.connect(gM); gP.connect(gM);
+      const gV = oc.createGain(), gP = oc.createGain(); gV.gain.value = vol.v; gP.gain.value = vol.p; gV.connect(gM); gP.connect(gM); addReverb(oc, gV, gM, rev);
       const sV = oc.createBufferSource(); sV.buffer = voiceBuf; sV.connect(gV); sV.start(0, trimA);
       const sP = oc.createBufferSource(); sP.buffer = pbBuf; sP.connect(gP);
       const pIn = trimA - offset(); if (pIn >= 0) { if (pIn < pbBuf.duration) sP.start(0, pIn); } else sP.start(-pIn, 0);
