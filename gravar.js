@@ -123,7 +123,8 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   async function keepAwake() { try { if ("wakeLock" in navigator) wake = await navigator.wakeLock.request("screen"); } catch (e) {} }
   function stopCam() { if (camStream) camStream.getTracks().forEach(t => t.stop()); camStream = null; }
   function close() {
-    closed = true; try { if (pbSrc) pbSrc.stop(); } catch (e) {} stopPreview(); stopCam();
+    closed = true; try { if (pbSrc) { pbSrc.stop(); pbSrc.disconnect(); } } catch (e) {} stopPreview(); stopCam();
+    try { if (ctx) ctx.close(); } catch (e) {} ctx = null;
     try { if (recorder && recorder.state !== "inactive") recorder.stop(); } catch (e) {}
     try { if (wake) wake.release(); } catch (e) {}
     try { if (navigator.audioSession) navigator.audioSession.type = "auto"; } catch (e) {}
@@ -266,7 +267,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   function stopRec() {
     if (!recording) return; recording = false; clearInterval(tick);
     recDur = (performance.now() - recT0) / 1000;
-    try { pbSrc.onended = null; pbSrc.stop(); } catch (e) {}
+    try { pbSrc.onended = null; pbSrc.stop(); } catch (e) {} try { pbSrc.disconnect(); } catch (e) {}
     if (pipVideo) pipVideo.pause();
     try { recorder.stop(); } catch (e) {}
     box.innerHTML = header() + `<div class="empty">Preparando a sua gravação...</div>`;
@@ -291,12 +292,18 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   function stopPreview() {
     if (!preview) return;
     try { preview.srcV.stop(); } catch (e) {} try { preview.srcP.stop(); } catch (e) {}
+    // o iPhone às vezes ignora o "parar" de um som agendado: desligar os fios garante o silêncio
+    try { preview.gM.disconnect(); } catch (e) {} try { preview.srcV.disconnect(); preview.srcP.disconnect(); } catch (e) {}
     if (preview.cam) { preview.cam.pause(); preview.cam.playbackRate = 1; } clearTimeout(preview.camPlay);
     cancelAnimationFrame(preview.raf); preview = null;
     const pb = box.querySelector("#stPlay"); if (pb) pb.textContent = "Play";
     const ov = box.querySelector("#stFadeOv"); if (ov) ov.style.opacity = 0;
+    sleepAudioSoon();
   }
   const offset = () => offsetAuto + fix;
+  // quando nada está tocando, o áudio do app "dorme" (some a onda da Dynamic Island e nenhum som fica preso)
+  let rendering = false;
+  function sleepAudioSoon() { setTimeout(() => { if (!preview && !recording && !rendering && ctx && ctx.state === "running") ctx.suspend().catch(() => {}); }, 400); }
 
   function showEdit() {
     const envV = envelope(voiceBuf), envP = envelope(pbBuf);
@@ -480,7 +487,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       if (pIn >= 0) { if (pIn < pbBuf.duration) srcP.start(when, pIn); } else srcP.start(when - pIn, 0);
       cam.playbackRate = 1; cam.currentTime = pos;
       const camPlay = setTimeout(() => { const go = () => cam.play().catch(() => {}); if (cam.seeking) cam.addEventListener("seeked", go, { once: true }); else go(); }, 80);
-      preview = { srcV, srcP, gV, gP, startCtx: when, startPos: pos, cam, raf: 0, camPlay };
+      preview = { srcV, srcP, gV, gP, gM, startCtx: when, startPos: pos, cam, raf: 0, camPlay };
       box.querySelector("#stPlay").textContent = "Pause";
       const loop = () => {
         if (!preview) return; const p = currentPos();
@@ -522,7 +529,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
         <div class="bar"><i id="stBar"></i></div><p class="small muted" id="stPct" style="margin:0">0%</p>
         <button class="btn" id="stCancel">Cancelar</button>
       </div>`;
-    keepAwake();
+    keepAwake(); rendering = true;
     const c = audioCtx();
     try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
     const cam = el("video"); cam.muted = true; cam.playsInline = true; cam.setAttribute("playsinline", ""); cam.preload = "auto"; cam.src = recUrl;
@@ -546,14 +553,14 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       const sP = oc.createBufferSource(); sP.buffer = pbBuf; sP.connect(gP);
       const pIn = trimA - offset(); if (pIn >= 0) { if (pIn < pbBuf.duration) sP.start(0, pIn); } else sP.start(-pIn, 0);
       mix = await oc.startRendering();
-    } catch (e) { console.warn(e); cam.remove(); cv.remove(); toast("Não consegui fazer a mixagem neste aparelho."); showEdit(); return; }
+    } catch (e) { console.warn(e); cam.remove(); cv.remove(); rendering = false; toast("Não consegui fazer a mixagem neste aparelho."); showEdit(); return; }
     const dest = c.createMediaStreamDestination(); dest.channelCount = 2;
     const srcM = c.createBufferSource(); srcM.buffer = mix; srcM.connect(dest);
     const stream = new MediaStream([...cv.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
     const mime = pickMime(); const out = [];
     let rec;
     try { rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 5_000_000, audioBitsPerSecond: 192_000 } : undefined); }
-    catch (e) { cv.remove(); cam.remove(); toast("Este aparelho não conseguiu montar o vídeo."); showEdit(); return; }
+    catch (e) { cv.remove(); cam.remove(); rendering = false; toast("Este aparelho não conseguiu montar o vídeo."); showEdit(); return; }
     rec.ondataavailable = e => { if (e.data && e.data.size) out.push(e.data); };
     let cancelled = false, raf = 0;
     const done = new Promise(r => { rec.onstop = r; });
@@ -579,7 +586,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     };
     frame();
     await done; cancelAnimationFrame(raf);
-    try { srcM.stop(); } catch (e) {} cam.pause(); cam.remove(); cv.remove();
+    try { srcM.stop(); srcM.disconnect(); } catch (e) {} rendering = false; sleepAudioSoon(); cam.pause(); cam.remove(); cv.remove();
     try { if (wake) wake.release(); } catch (e) {}
     if (cancelled || closed) { if (!closed) showEdit(); return; }
     const type = rec.mimeType || out[0]?.type || "video/mp4";
