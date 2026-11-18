@@ -118,7 +118,21 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   let pbSrc = null, offsetAuto = 0;
   let pipVideo = null, pipUrl = URL.createObjectURL(videoBlob), pipPos = null, pipLevel = 0;
   let facing = lsGet("cp-rec-cam") === "environment" ? "environment" : "user";
-  let camCount = 0; // quantas câmeras o aparelho tem (o botão Trocar câmera só aparece com mais de uma)
+  // equipamento escolhido (câmera, microfone e saída do som), guardado no aparelho
+  let devs = { cams: [], mics: [], outs: [] };
+  let camId = lsGet("cp-rec-camid") || "", micId = lsGet("cp-rec-micid") || "", outId = lsGet("cp-rec-outid") || "";
+  const canPickOut = () => !!(window.AudioContext && AudioContext.prototype.setSinkId);
+  async function listDevices() {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      devs = { cams: all.filter(d => d.kind === "videoinput"), mics: all.filter(d => d.kind === "audioinput" && d.deviceId !== "communications"), outs: all.filter(d => d.kind === "audiooutput" && d.deviceId !== "communications") };
+    } catch (e) {}
+    const v = camStream && camStream.getVideoTracks()[0], a = camStream && camStream.getAudioTracks()[0];
+    if (v && v.getSettings().deviceId) camId = v.getSettings().deviceId;
+    if (a && a.getSettings().deviceId) micId = a.getSettings().deviceId;
+  }
+  async function applyOut() { try { if (outId && canPickOut()) await audioCtx().setSinkId(outId === "default" ? "" : outId); } catch (e) { console.warn(e); } }
+  const isMirror = () => { const v = camStream && camStream.getVideoTracks()[0]; const f = v && v.getSettings().facingMode; return f ? f === "user" : facing === "user" && !camId; };
   const vol = Object.assign({ v: 1, p: 0.8 }, (() => { try { return JSON.parse(lsGet(LS_VOL) || "{}"); } catch (e) { return {}; } })());
   let fix = +(lsGet(LS_FIX) || 0); // correção manual guardada
 
@@ -158,7 +172,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
           <li><b>Lugar:</b> escolha um canto silencioso, com a luz de frente para você (janela à sua frente, não atrás).</li>
           <li><b>Celular:</b> apoie num suporte ou tripé, na altura dos olhos. Em pé para Reels e Status, deitado para YouTube.</li>
           <li><b>Fone:</b> coloque o fone antes de ligar a câmera (veja o quadro abaixo).</li>
-          <li><b>Câmera:</b> toque em Ligar câmera. Arraste o vídeo com letra para onde ficar melhor e toque duas vezes nele para mudar o tamanho. No celular, o botão Trocar câmera alterna entre a da frente e a de trás.</li>
+          <li><b>Câmera:</b> toque em Ligar câmera. Arraste o vídeo com letra para onde ficar melhor e toque duas vezes nele para mudar o tamanho. Se o aparelho tiver mais de uma câmera ou microfone (por exemplo, uma interface de áudio), escolha qual usar em Equipamento, logo abaixo da câmera.</li>
           <li><b>Gravar:</b> toque em Gravar, espere a contagem de 3 e cante. A gravação para sozinha quando a música acaba, ou toque em Parar.</li>
           <li><b>Ajustar:</b> confira com o Play. Acerte o volume da voz e do playback, corte o começo e o fim pelas alças douradas e escolha o fade.</li>
           <li><b>Salvar:</b> toque em Assistir à prévia do vídeo final. Se estiver bom, toque em Salvar vídeo e depois em Salvar ou compartilhar. No iPhone, escolha Salvar vídeo para ir para a galeria.</li>
@@ -180,17 +194,34 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
 
   async function openCam() {
     stopCam();
-    camStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
-    });
+    const video = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+    if (camId) video.deviceId = { exact: camId }; else video.facingMode = { ideal: facing };
+    const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: 1 } };
+    if (micId) audio.deviceId = { exact: micId };
+    try { camStream = await navigator.mediaDevices.getUserMedia({ video, audio }); }
+    catch (e) {
+      // se o equipamento guardado não estiver mais conectado, volta para o padrão
+      if (!camId && !micId) throw e;
+      camId = ""; micId = ""; return openCam();
+    }
   }
-  async function flipCam() {
+  // escolha de câmera, microfone e saída do som (só aparece o que tiver mais de uma opção)
+  function equipHtml() {
+    const opt = (list, cur, fallback) => list.map((d, i) => `<option value="${escH(d.deviceId)}" ${d.deviceId === cur ? "selected" : ""}>${escH(d.label || fallback + " " + (i + 1))}</option>`).join("");
+    const rows = [];
+    if (devs.cams.length > 1) rows.push(`<div class="mixrow" style="grid-template-columns:100px 1fr"><label for="stCamSel">Câmera</label><select class="field" id="stCamSel" data-dev="cam" style="padding:8px 10px">${opt(devs.cams, camId, "Câmera")}</select></div>`);
+    if (devs.mics.length > 1) rows.push(`<div class="mixrow" style="grid-template-columns:100px 1fr"><label for="stMicSel">Microfone</label><select class="field" id="stMicSel" data-dev="mic" style="padding:8px 10px">${opt(devs.mics, micId, "Microfone")}</select></div>`);
+    if (canPickOut() && devs.outs.length > 1) rows.push(`<div class="mixrow" style="grid-template-columns:100px 1fr"><label for="stOutSel">Ouvir em</label><select class="field" id="stOutSel" data-dev="out" style="padding:8px 10px">${opt(devs.outs, outId || "default", "Saída")}</select></div>`);
+    return rows.length ? `<div class="card" id="stEquip" style="gap:8px"><b>Equipamento</b>${rows.join("")}<p class="small muted" style="margin:0">Usa interface de áudio? Escolha a entrada do microfone e, em Ouvir em, a saída onde está o seu fone.</p></div>` : "";
+  }
+  async function changeDevice(kind, id) {
     if (recording) return;
-    const b = box.querySelector("#stFlip"); if (b) { b.disabled = true; b.textContent = "Trocando..."; }
-    const old = facing; facing = facing === "user" ? "environment" : "user";
-    try { await openCam(); lsSet("cp-rec-cam", facing); }
-    catch (e) { facing = old; toast("Não consegui trocar a câmera neste aparelho."); try { await openCam(); } catch (e2) {} }
+    if (kind === "out") { outId = id; lsSet("cp-rec-outid", id); await applyOut(); toast("Saída do som trocada."); return; }
+    const oldCam = camId, oldMic = micId;
+    if (kind === "cam") camId = id; else micId = id;
+    try { await openCam(); lsSet("cp-rec-camid", camId); lsSet("cp-rec-micid", micId); }
+    catch (e) { camId = oldCam; micId = oldMic; toast("Não consegui usar esse equipamento."); try { await openCam(); } catch (e2) {} }
+    await listDevices();
     if (!closed) showRecord();
   }
   async function startCam() {
@@ -205,7 +236,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       return;
     }
     if (closed) return stopCam();
-    try { camCount = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput").length; } catch (e) { camCount = 0; }
+    await listDevices(); await applyOut();
     keepAwake();
     showRecord();
   }
@@ -214,13 +245,13 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   function showRecord() {
     box.innerHTML = header("Arraste o vídeo com letra para onde quiser. Toque duas vezes nele para mudar o tamanho (pequeno, médio, grande).") + `
       <div class="st-cam" id="stCam">
-        <video class="cam ${facing === "user" ? "mirror" : ""}" id="stLive" playsinline muted autoplay></video>
+        <video class="cam ${isMirror() ? "mirror" : ""}" id="stLive" playsinline muted autoplay></video>
         <div class="st-pip ${pipLevel ? "l" + pipLevel : ""}" id="stPip"><video playsinline muted preload="auto" src="${pipUrl}"></video></div>
         <div class="st-rec" id="stRecTag">● Gravando 0:00</div>
         <div class="st-count" id="stCount"></div>
       </div>
       <button class="btn st-big st-rec-btn" id="stGo">Gravar</button>
-      ${camCount > 1 ? `<button class="btn" id="stFlip">Trocar câmera (agora: ${facing === "user" ? "da frente" : "de trás"})</button>` : ""}
+      ${equipHtml()}
       <p class="small muted" style="margin:0;text-align:center">O playback toca no fone e a gravação para sozinha quando a música acaba.</p>`;
     const live = box.querySelector("#stLive"); live.srcObject = camStream; live.play().catch(() => {});
     pipVideo = box.querySelector("#stPip video");
@@ -249,7 +280,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     };
     pip.addEventListener("pointerup", up); pip.addEventListener("pointercancel", () => { drag = null; });
     window.addEventListener("resize", () => { if (box.contains(pip)) place(); });
-    const flip = box.querySelector("#stFlip"); if (flip) flip.onclick = flipCam;
+    box.querySelectorAll("[data-dev]").forEach(sel => sel.onchange = () => changeDevice(sel.dataset.dev, sel.value));
     box.querySelector("#stGo").onclick = () => recording ? stopRec() : countdown();
   }
 
@@ -281,7 +312,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       pbSrc.onended = () => { if (recording) setTimeout(stopRec, 1200); };
       recording = true;
       const go = box.querySelector("#stGo"); go.disabled = false; go.textContent = "Parar";
-      const fl = box.querySelector("#stFlip"); if (fl) fl.hidden = true;
+      const eq = box.querySelector("#stEquip"); if (eq) eq.hidden = true;
       const tag = box.querySelector("#stRecTag"); tag.classList.add("on");
       tick = setInterval(() => { tag.textContent = "● Gravando " + fmtT((performance.now() - recT0) / 1000); }, 250);
     };
@@ -300,7 +331,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     recBlob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "video/mp4" }); chunks = [];
     recUrl = URL.createObjectURL(recBlob);
     try {
-      const c = await freshAudio();
+      const c = await freshAudio(); await applyOut();
       pbBuf = await c.decodeAudioData(await videoBlob.arrayBuffer());
       voiceBuf = await c.decodeAudioData(await recBlob.arrayBuffer());
     }
