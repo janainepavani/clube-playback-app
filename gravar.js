@@ -150,7 +150,12 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
 
   function showSetup() {
     box.innerHTML = header() + `
-      <div class="note">Use <b>fone de ouvido com fio</b>. Assim o microfone pega só a sua voz, e o playback entra limpo no vídeo. Fone Bluetooth atrasa o som.</div>
+      <div class="card" style="border-color:var(--bronze);gap:8px">
+        <b>Antes de gravar: use fone de ouvido</b>
+        <p class="small" style="margin:0"><b>Fone com fio: o melhor resultado.</b> O microfone pega só a sua voz e o playback entra limpo no vídeo, já sincronizado.</p>
+        <p class="small" style="margin:0"><b>Fone Bluetooth: funciona,</b> mas ele atrasa o som. No final, talvez você precise acertar a sincronia, arrastando a faixa da sua voz na parte Sincronia.</p>
+        <p class="small" style="margin:0"><b>Sem fone: não recomendamos.</b> O microfone capta o playback que sai do alto-falante junto com a sua voz, e o som do vídeo fica embolado.</p>
+      </div>
       <div class="note">Escolha agora a posição do celular, em pé ou deitado. O vídeo sai do mesmo jeito.</div>
       <div class="st-cam" id="stCam"><div class="empty" style="width:100%">Toque em Ligar câmera</div></div>
       <button class="btn primary st-big" id="stOn">Ligar câmera e microfone</button>`;
