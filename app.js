@@ -312,6 +312,7 @@ function render() {
   if (typing && $("supText")) { const t = $("supText"); t.focus(); try { t.setSelectionRange(t.value.length, t.value.length); } catch (e) {} }
   if (S.view === "song") mountSong();
   if (S.view === "support" || S.view === "admthread") mountChat();
+  maybeWelcome();
 }
 // repinta sem destruir o vídeo que está tocando
 function paint(html) {
@@ -397,6 +398,7 @@ function viewCatalog() {
     <input class="search" id="q" type="search" placeholder="Buscar música" aria-label="Buscar música" value="${esc(S.query)}">
     ${S.songs.length ? `<div class="tabs" role="tablist" style="margin-top:10px">${[["all", "Todas", S.songs.length], ["trio", "Trio", count("trio")], ["piano", "Piano", count("piano")]].map(([v, l, n]) => `<button role="tab" aria-selected="${S.filter === v}" data-a="filter" data-f="${v}">${l} (${n})</button>`).join("")}</div>` : ""}`;
   html += untilBanner();
+  html += newsBanner();
   if (!navigator.onLine) html += `<p class="note">Sem internet: só as músicas salvas no aparelho tocam.</p>`;
   if (!S.songs.length) html += `<p class="muted">${S.isAdmin ? "Nenhuma música ainda. Abra o Painel da Janaine, na aba Conta, para cadastrar a primeira." : "As músicas estão chegando. Volte em breve."}</p>`;
   let last = "";
@@ -550,6 +552,7 @@ function viewAccount() {
       <p class="small muted" style="margin:0">${S.saved.size} ${S.saved.size === 1 ? "tom salvo" : "tons salvos"} neste aparelho.</p>
       <div class="hrow">${S.saved.size ? `<button class="btn sm" data-a="wipe">Apagar tudo do aparelho</button>` : ""}<button class="btn sm" data-a="logout">Sair</button></div>
     </div>
+    <button class="btn" data-a="welcome">Como usar o app</button>
     ${S.isAdmin || !S.sup.ready ? "" : `<button class="card" data-a="nav" data-v="support" style="text-align:left;cursor:pointer;color:inherit">
       <div class="hrow spread" style="width:100%"><b>Fale com a Janaine</b>${S.sup.unreadUser ? `<span class="pill warn">Resposta nova</span>` : ""}</div>
       <span class="small muted">Dúvidas, sugestões e problemas no app. Pode mandar print da tela.</span></button>`}
@@ -558,6 +561,40 @@ function viewAccount() {
       : `<div class="card"><b>Confirme seu e-mail para abrir o painel</b><p class="small muted" style="margin:0">Por segurança, o painel só abre depois que você confirma o e-mail ${ADMIN_EMAIL}.</p>
         <div class="hrow"><button class="btn sm" data-a="verify">Enviar e-mail de confirmação</button><button class="btn sm" data-a="verified">Já confirmei</button></div></div>`) : ""}
   </div>`;
+}
+
+/* ---------------- boas-vindas e novidades ---------------- */
+const WELCOME_V = "1";            // mudar o número faz a tela aparecer de novo para todo mundo
+const NEWS = { id: "gravar-1", html: `<b>Novidade: grave o seu vídeo cantando com o playback.</b> Abra qualquer música e toque em Gravar. A função está em teste (Beta).` };
+function welcomeHtml() {
+  return `<div class="stack" style="max-width:620px;margin:0 auto">
+    <h1 class="title">Boas-vindas ao Clube Playback</h1>
+    <p class="muted" style="margin:0">Um resumo do que você encontra aqui:</p>
+    <div class="card" style="gap:12px">
+      <p style="margin:0"><b>Músicas.</b> Cada música tem o vídeo com letra, a letra e a partitura. Escolha o seu tom uma vez e ele fica guardado.</p>
+      <p style="margin:0"><b>Sem internet.</b> Salve as músicas no aparelho e use no show, mesmo sem sinal.</p>
+      <p style="margin:0"><b>Playlists.</b> Monte o repertório do seu evento na ordem que quiser.</p>
+      <p style="margin:0"><b>Modo apresentação.</b> Toque a playlist inteira, passe de uma música para a outra e veja letra e partitura, com a tela travada para não mexer sem querer.</p>
+      <p style="margin:0"><b>Gravar meu vídeo</b> <span class="pill brass">Beta</span><br>Grave você cantando com o playback e saia com o vídeo pronto para postar. Fica dentro de cada música.</p>
+    </div>
+    <p class="note" style="margin:0">O app ainda está sendo atualizado e melhorado. Novas funções e ajustes vão chegando aos poucos, e a sua opinião ajuda muito.</p>
+    <button class="btn primary" data-a="welcomeok" style="padding:14px">Começar</button>
+    <p class="small muted" style="margin:0;text-align:center">Para ver este resumo de novo: Conta, Como usar o app.</p>
+  </div>`;
+}
+let welcomeOpen = false;
+function openWelcome() {
+  welcomeOpen = true;
+  let w = $("welcome");
+  if (!w) { w = document.createElement("div"); w.id = "welcome"; w.className = "pres show"; w.setAttribute("role", "dialog"); w.setAttribute("aria-label", "Boas-vindas"); document.body.appendChild(w); }
+  w.innerHTML = `<div class="pres-in">${welcomeHtml()}</div>`; w.scrollTop = 0; document.body.style.overflow = "hidden";
+}
+function closeWelcome() { welcomeOpen = false; ls.set("cp-welcome", WELCOME_V); const w = $("welcome"); if (w) w.remove(); document.body.style.overflow = ""; }
+function maybeWelcome() { if (!welcomeOpen && !presOpen && ls.get("cp-welcome") !== WELCOME_V) openWelcome(); }
+function newsBanner() {
+  if (ls.get("cp-news") === NEWS.id) return "";
+  return `<div class="card" style="border-color:var(--bronze);margin:10px 0;gap:8px"><p class="small" style="margin:0">${NEWS.html}</p>
+    <div class="hrow"><button class="btn sm" data-a="welcome">Ver tudo o que o app faz</button><button class="btn sm ghost" data-a="closenews">Fechar</button></div></div>`;
 }
 
 /* ---------------- mensagens (suporte) ---------------- */
@@ -945,6 +982,9 @@ document.addEventListener("click", async e => {
     }
     else if (a === "openthread") { S.thread = el.dataset.uid; S.view = "admthread"; S.supDraft = ""; supFile = null; render(); window.scrollTo(0, 0); }
     else if (a === "supnofile") { supFile = null; render(); }
+    else if (a === "welcome") openWelcome();
+    else if (a === "welcomeok") closeWelcome();
+    else if (a === "closenews") { ls.set("cp-news", NEWS.id); render(); }
     else if (a === "present") openPres();
     else if (a === "closepres") closePres();
     else if (a === "pgo") { presIdx += +el.dataset.d; presReady = false; presSheet = 0; presKeys = false; renderPres(); }
