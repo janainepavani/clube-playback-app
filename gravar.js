@@ -46,10 +46,11 @@ const CSS = `
 .st{position:fixed;inset:0;z-index:30;background:#060505;color:var(--cream);overflow:auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
 .st-in{max-width:960px;margin:0 auto;padding:14px 16px 30px;display:flex;flex-direction:column;gap:14px}
 .st-cam{position:relative;background:#000;border-radius:14px;overflow:hidden;display:grid;place-items:center;min-height:200px;max-height:72vh}
-.st-cam video.cam{width:100%;max-height:72vh;object-fit:contain;display:block;transform:scaleX(-1)}
-.st-pip{position:absolute;width:38%;max-width:260px;border-radius:10px;overflow:hidden;box-shadow:0 6px 20px #000d;border:1px solid #ffffff30;background:#000;cursor:pointer;transition:all .2s}
+.st-cam video.cam{width:100%;max-height:72vh;object-fit:contain;display:block}
+.st-cam video.cam.mirror{transform:scaleX(-1)}
+.st-pip{position:absolute;width:38%;max-width:260px;border-radius:10px;overflow:hidden;box-shadow:0 6px 20px #000d;border:2px solid #c49a6c;background:#000;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;z-index:2}
+.st-pip video{pointer-events:none}
 .st-pip video{width:100%;display:block}
-.st-pip.tr{top:10px;right:10px}.st-pip.tl{top:10px;left:10px}.st-pip.br{bottom:10px;right:10px}.st-pip.bl{bottom:10px;left:10px}
 .st-pip.big{width:62%;max-width:420px}
 .st-rec{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:#b3261e;color:#fff;font-weight:700;font-size:14px;padding:4px 12px;border-radius:99px;display:none}
 .st-rec.on{display:block}
@@ -69,6 +70,11 @@ const CSS = `
 .nudges{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 .nudges .btn{min-width:64px}
 .syncval{font-variant-numeric:tabular-nums;font-weight:700;color:var(--bronze)}
+.transport{display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap}
+.transport .btn{min-width:56px}
+.transport .play{min-width:110px}
+.scrub{width:100%;accent-color:var(--bronze)}
+.tbig{font-variant-numeric:tabular-nums;font-size:20px;font-weight:700;text-align:center}
 .st-result video{width:100%;max-height:70vh;background:#000;border-radius:12px;display:block}
 `;
 
@@ -81,7 +87,8 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   let pbBuf = null, voiceBuf = null, recBlob = null, recUrl = null, recDur = 0, trimA = 0, trimB = 0;
   const fade = Object.assign({ i: 1, o: 2 }, (() => { try { return JSON.parse(lsGet("cp-rec-fade") || "{}"); } catch (e) { return {}; } })());
   let pbSrc = null, offsetAuto = 0;
-  let pipVideo = null, pipUrl = URL.createObjectURL(videoBlob), pipCorner = "tr";
+  let pipVideo = null, pipUrl = URL.createObjectURL(videoBlob), pipPos = null, pipBig = false;
+  let facing = lsGet("cp-rec-cam") === "environment" ? "environment" : "user";
   const vol = Object.assign({ v: 1, p: 0.8 }, (() => { try { return JSON.parse(lsGet(LS_VOL) || "{}"); } catch (e) { return {}; } })());
   let fix = +(lsGet(LS_FIX) || 0); // correção manual guardada
 
@@ -120,15 +127,27 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     box.querySelector("#stOn").onclick = startCam;
   }
 
+  async function openCam() {
+    stopCam();
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
+    });
+  }
+  async function flipCam() {
+    if (recording) return;
+    const b = box.querySelector("#stFlip"); if (b) { b.disabled = true; b.textContent = "Trocando..."; }
+    const old = facing; facing = facing === "user" ? "environment" : "user";
+    try { await openCam(); lsSet("cp-rec-cam", facing); }
+    catch (e) { facing = old; toast("Não consegui trocar a câmera neste aparelho."); try { await openCam(); } catch (e2) {} }
+    if (!closed) showRecord();
+  }
   async function startCam() {
     const btn = box.querySelector("#stOn"); btn.disabled = true; btn.textContent = "Ligando...";
     try {
       try { if (navigator.audioSession) navigator.audioSession.type = "play-and-record"; } catch (e) {}
       audioCtx();
-      camStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
-      });
+      await openCam();
     } catch (e) {
       console.warn(e); btn.disabled = false; btn.textContent = "Tentar de novo";
       toast("Não consegui abrir a câmera e o microfone. Permita o acesso nas configurações do aparelho.");
@@ -141,24 +160,44 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
 
   /* ---------- 2. gravar ---------- */
   function showRecord() {
-    box.innerHTML = header("Toque no vídeo pequeno para mudar de canto. Toque duas vezes para aumentar.") + `
+    box.innerHTML = header("Arraste o vídeo com letra para onde quiser. Toque duas vezes nele para aumentar ou diminuir.") + `
       <div class="st-cam" id="stCam">
-        <video class="cam" id="stLive" playsinline muted autoplay></video>
-        <div class="st-pip ${pipCorner}" id="stPip"><video playsinline muted preload="auto" src="${pipUrl}"></video></div>
+        <video class="cam ${facing === "user" ? "mirror" : ""}" id="stLive" playsinline muted autoplay></video>
+        <div class="st-pip ${pipBig ? "big" : ""}" id="stPip"><video playsinline muted preload="auto" src="${pipUrl}"></video></div>
         <div class="st-rec" id="stRecTag">● Gravando 0:00</div>
         <div class="st-count" id="stCount"></div>
       </div>
       <button class="btn st-big st-rec-btn" id="stGo">Gravar</button>
+      <button class="btn" id="stFlip">Trocar câmera (agora: ${facing === "user" ? "da frente" : "de trás"})</button>
       <p class="small muted" style="margin:0;text-align:center">O playback toca no fone e a gravação para sozinha quando a música acaba.</p>`;
     const live = box.querySelector("#stLive"); live.srcObject = camStream; live.play().catch(() => {});
     pipVideo = box.querySelector("#stPip video");
-    const pip = box.querySelector("#stPip"); let lastTap = 0;
-    pip.onclick = () => {
-      const now = Date.now();
-      if (now - lastTap < 300) { pip.classList.toggle("big"); lastTap = 0; return; }
-      lastTap = now;
-      setTimeout(() => { if (lastTap !== now) return; const order = ["tr", "br", "bl", "tl"]; pip.classList.remove(pipCorner); pipCorner = order[(order.indexOf(pipCorner) + 1) % 4]; pip.classList.add(pipCorner); }, 310);
+    const pip = box.querySelector("#stPip"), area = box.querySelector("#stCam");
+    // posição guardada em fração da área da câmera, para funcionar em pé e deitado
+    const place = () => {
+      const aw = area.clientWidth, ah = area.clientHeight, pw = pip.offsetWidth, ph = pip.offsetHeight;
+      const pos = pipPos || { x: 1, y: 0 };
+      pip.style.left = Math.round(Math.max(0, Math.min(aw - pw, pos.x * (aw - pw)))) + "px";
+      pip.style.top = Math.round(Math.max(0, Math.min(ah - ph, pos.y * (ah - ph)))) + "px";
     };
+    place(); live.addEventListener("loadedmetadata", place); pipVideo.addEventListener("loadedmetadata", place);
+    let drag = null, lastTap = 0;
+    pip.addEventListener("pointerdown", e => { e.preventDefault(); pip.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, l: pip.offsetLeft, t: pip.offsetTop, moved: false }; });
+    pip.addEventListener("pointermove", e => {
+      if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 6) drag.moved = true; if (!drag.moved) return;
+      const aw = area.clientWidth, ah = area.clientHeight, pw = pip.offsetWidth, ph = pip.offsetHeight;
+      const l = Math.max(0, Math.min(aw - pw, drag.l + dx)), t = Math.max(0, Math.min(ah - ph, drag.t + dy));
+      pip.style.left = l + "px"; pip.style.top = t + "px";
+      pipPos = { x: aw > pw ? l / (aw - pw) : 0, y: ah > ph ? t / (ah - ph) : 0 };
+    });
+    const up = () => {
+      if (!drag) return; const moved = drag.moved; drag = null; if (moved) return;
+      const now = Date.now(); if (now - lastTap < 350) { pipBig = !pipBig; pip.classList.toggle("big", pipBig); place(); lastTap = 0; } else lastTap = now;
+    };
+    pip.addEventListener("pointerup", up); pip.addEventListener("pointercancel", () => { drag = null; });
+    window.addEventListener("resize", () => { if (box.contains(pip)) place(); });
+    box.querySelector("#stFlip").onclick = flipCam;
     box.querySelector("#stGo").onclick = () => recording ? stopRec() : countdown();
   }
 
@@ -190,6 +229,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       pbSrc.onended = () => { if (recording) setTimeout(stopRec, 1200); };
       recording = true;
       const go = box.querySelector("#stGo"); go.disabled = false; go.textContent = "Parar";
+      const fl = box.querySelector("#stFlip"); if (fl) fl.hidden = true;
       const tag = box.querySelector("#stRecTag"); tag.classList.add("on");
       tick = setInterval(() => { tag.textContent = "● Gravando " + fmtT((performance.now() - recT0) / 1000); }, 250);
     };
@@ -221,6 +261,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     try { preview.srcV.stop(); } catch (e) {} try { preview.srcP.stop(); } catch (e) {}
     if (preview.cam) preview.cam.pause(); clearTimeout(preview.camPlay);
     cancelAnimationFrame(preview.raf); preview = null;
+    const pb = box.querySelector("#stPlay"); if (pb) pb.textContent = "Play";
   }
   const offset = () => offsetAuto + fix;
 
@@ -229,7 +270,15 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     let zoom = false, winStart = 0, playPos = 0; // posição na linha do tempo da gravação
     box.innerHTML = header("Ajuste o volume e a sincronia. Depois toque em Salvar vídeo.") + `
       <div class="st-cam"><video class="cam" id="stPrev" playsinline muted preload="auto" src="${recUrl}" style="transform:none"></video></div>
-      <div class="hrow" style="justify-content:center"><button class="btn primary" id="stPlay" style="min-width:140px">Ouvir</button><span class="small muted" id="stTime">0:00 / ${fmtT(recDur)}</span></div>
+      <div class="card" style="gap:8px">
+        <div class="tbig"><span id="stTime">0:00,0</span> <span class="small muted" style="font-weight:500">/ ${fmtT1(recDur)}</span></div>
+        <input type="range" class="scrub" id="stScrub" min="0" max="${recDur.toFixed(2)}" step="0.01" value="0" aria-label="Posição no vídeo">
+        <div class="transport">
+          <button class="btn sm" data-sk="-5">−5 s</button><button class="btn sm" data-sk="-1">−1 s</button>
+          <button class="btn primary play" id="stPlay">Play</button>
+          <button class="btn sm" data-sk="1">+1 s</button><button class="btn sm" data-sk="5">+5 s</button>
+        </div>
+      </div>
       <div class="card">
         <b>Volume</b>
         <div class="mixrow"><label for="stVv">Sua voz</label><input type="range" id="stVv" min="0" max="2" step="0.01" value="${vol.v}"><output id="stVvO"></output></div>
@@ -237,7 +286,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       </div>
       <div class="card">
         <div class="hrow spread"><b>Cortar</b><span class="small muted">Duração final <span class="syncval" id="stLen"></span></span></div>
-        <p class="small muted" style="margin:0">Encurte o começo ou o fim, ou deixe só um trecho. Toque em Ouvir e marque o ponto certo com os botões.</p>
+        <p class="small muted" style="margin:0">Encurte o começo ou o fim, ou deixe só um trecho. Toque em Play, pause no ponto certo e marque com os botões. Também dá para usar a barra de tempo e os botões de voltar e avançar lá em cima.</p>
         <div class="mixrow"><label for="stTa">Começa em</label><input type="range" id="stTa" min="0" max="${recDur.toFixed(2)}" step="0.05" value="${trimA}"><output id="stTaO"></output></div>
         <div class="mixrow"><label for="stTb">Termina em</label><input type="range" id="stTb" min="0" max="${recDur.toFixed(2)}" step="0.05" value="${trimB}"><output id="stTbO"></output></div>
         <div class="nudges"><button class="btn sm" id="stMarkA">Marcar começo aqui</button><button class="btn sm" id="stMarkB">Marcar fim aqui</button></div>
@@ -308,6 +357,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     }
     // linha do tempo "do playback": playback começa em 0, a voz começa em -offset
     function draw(playT) {
+      if (playT === undefined) playT = playPos - offset();
       drawLane(cP, envP, 0, "#c49a6c", playT);
       drawLane(cV, envV, -offset(), "#8a1a17", playT);
       box.querySelector("#stSync").textContent = ms(-fix);
@@ -350,18 +400,32 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       if (pIn >= 0) { if (pIn < pbBuf.duration) srcP.start(when, pIn); } else srcP.start(when - pIn, 0);
       cam.currentTime = pos; const camPlay = setTimeout(() => cam.play().catch(() => {}), 80);
       preview = { srcV, srcP, gV, gP, startCtx: when, startPos: pos, cam, raf: 0, camPlay };
-      box.querySelector("#stPlay").textContent = "Parar";
+      box.querySelector("#stPlay").textContent = "Pause";
       const loop = () => {
         if (!preview) return; const p = currentPos();
-        if (p >= trimB) { stopPreview(); playPos = trimA; box.querySelector("#stPlay").textContent = "Ouvir"; draw(); return; }
+        if (p >= trimB) { stopPreview(); box.querySelector("#stPlay").textContent = "Play"; seekTo(trimA); return; }
         if (Math.abs(cam.currentTime - p) > 0.15) cam.currentTime = p;
         if (zoom && (p - offset() > winStart + 3.8)) { winStart = Math.min(+win.max, p - offset() - 0.2); win.value = winStart; }
-        box.querySelector("#stTime").textContent = fmtT(p) + " / " + fmtT(recDur);
+        box.querySelector("#stTime").textContent = fmtT1(p); if (!scrubbing) box.querySelector("#stScrub").value = p;
         draw(p - offset()); preview.raf = requestAnimationFrame(loop);
       };
       loop();
     }
-    box.querySelector("#stPlay").onclick = () => { if (preview) { playPos = currentPos(); stopPreview(); box.querySelector("#stPlay").textContent = "Ouvir"; draw(); } else startPreview(playPos >= trimB - 0.1 || playPos < trimA ? trimA : playPos); };
+    // ir para um ponto: tocando, continua dali; pausado, mostra a imagem daquele ponto
+    let scrubbing = false;
+    function seekTo(pos) {
+      pos = Math.max(0, Math.min(recDur - 0.05, pos));
+      if (preview) { startPreview(pos); return; }
+      playPos = pos; cam.currentTime = pos;
+      box.querySelector("#stTime").textContent = fmtT1(pos); box.querySelector("#stScrub").value = pos;
+      if (zoom) { const pb = pos - offset(); if (pb < winStart || pb > winStart + 4) { winStart = Math.max(0, Math.min(+win.max, pb - 1)); win.value = winStart; } }
+      draw();
+    }
+    const scrub = box.querySelector("#stScrub");
+    scrub.addEventListener("input", () => { scrubbing = true; const was = !!preview; if (was) stopPreview(); seekTo(+scrub.value); scrub.dataset.was = was ? "1" : scrub.dataset.was || ""; });
+    scrub.addEventListener("change", () => { scrubbing = false; if (scrub.dataset.was === "1") { scrub.dataset.was = ""; startPreview(+scrub.value); } });
+    box.querySelectorAll("[data-sk]").forEach(b => b.onclick = () => seekTo((preview ? currentPos() : playPos) + +b.dataset.sk));
+    box.querySelector("#stPlay").onclick = () => { if (preview) { playPos = currentPos(); stopPreview(); box.querySelector("#stPlay").textContent = "Play"; seekTo(playPos); } else startPreview(playPos >= trimB - 0.1 || playPos < trimA ? trimA : playPos); };
     box.querySelector("#stAgain").onclick = () => { if (!confirm("Descartar esta gravação e gravar de novo?")) return; stopPreview(); URL.revokeObjectURL(recUrl); recBlob = null; voiceBuf = null; showSetup(); };
     box.querySelector("#stSave").onclick = () => { stopPreview(); render(); };
     requestAnimationFrame(() => showTrim());
