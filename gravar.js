@@ -12,6 +12,14 @@ let ctx = null;
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const fmtT = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ":" + String(Math.floor(s % 60)).padStart(2, "0"); };
 const fmtT1 = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ":" + (s % 60).toFixed(1).padStart(4, "0").replace(".", ","); };
+// Mantém o vídeo junto com o som sem pular: só ajusta a velocidade um pouquinho.
+// Pular (mudar currentTime) faz o iPhone travar a imagem, então só pula se estiver mais de 1 segundo fora.
+function follow(v, target) {
+  const d = v.currentTime - target;
+  if (Math.abs(d) > 1) { v.currentTime = target; v.playbackRate = 1; return; }
+  const r = Math.abs(d) < 0.03 ? 1 : Math.max(0.92, Math.min(1.08, 1 - d * 0.8));
+  if (Math.abs(v.playbackRate - r) > 0.005) v.playbackRate = r;
+}
 const ms = s => (s >= 0 ? "+" : "−") + Math.round(Math.abs(s) * 1000) + " ms";
 const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const escH = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -283,7 +291,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   function stopPreview() {
     if (!preview) return;
     try { preview.srcV.stop(); } catch (e) {} try { preview.srcP.stop(); } catch (e) {}
-    if (preview.cam) preview.cam.pause(); clearTimeout(preview.camPlay);
+    if (preview.cam) { preview.cam.pause(); preview.cam.playbackRate = 1; } clearTimeout(preview.camPlay);
     cancelAnimationFrame(preview.raf); preview = null;
     const pb = box.querySelector("#stPlay"); if (pb) pb.textContent = "Play";
     const ov = box.querySelector("#stFadeOv"); if (ov) ov.style.opacity = 0;
@@ -470,17 +478,20 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       srcV.start(when, pos);
       const pIn = pos - offset(); // posição dentro do playback
       if (pIn >= 0) { if (pIn < pbBuf.duration) srcP.start(when, pIn); } else srcP.start(when - pIn, 0);
-      cam.currentTime = pos; const camPlay = setTimeout(() => cam.play().catch(() => {}), 80);
+      cam.playbackRate = 1; cam.currentTime = pos;
+      const camPlay = setTimeout(() => { const go = () => cam.play().catch(() => {}); if (cam.seeking) cam.addEventListener("seeked", go, { once: true }); else go(); }, 80);
       preview = { srcV, srcP, gV, gP, startCtx: when, startPos: pos, cam, raf: 0, camPlay };
       box.querySelector("#stPlay").textContent = "Pause";
       const loop = () => {
         if (!preview) return; const p = currentPos();
         if (p >= trimB) { stopPreview(); box.querySelector("#stPlay").textContent = "Play"; seekTo(trimA); return; }
-        if (Math.abs(cam.currentTime - p) > 0.15) cam.currentTime = p;
+        if (!cam.paused && !cam.seeking) follow(cam, p);
         if (zoom && (p - offset() > winStart + 3.8)) { winStart = Math.min(+win.max, p - offset() - 0.2); win.value = winStart; }
         box.querySelector("#stTime").textContent = fmtT1(p); showHead(p);
         const ov = box.querySelector("#stFadeOv"); if (ov) ov.style.opacity = 1 - lvl(p - trimA);
-        draw(p - offset()); preview.raf = requestAnimationFrame(loop);
+        // redesenhar as ondas pesa no iPhone: só umas 8 vezes por segundo, para não atrapalhar a imagem
+        const now = performance.now(); if (now - (preview.lastDraw || 0) > 120) { preview.lastDraw = now; draw(p - offset()); }
+        preview.raf = requestAnimationFrame(loop);
       };
       loop();
     }
@@ -558,7 +569,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     const bar = box.querySelector("#stBar"), pctEl = box.querySelector("#stPct");
     const frame = () => {
       const p = c.currentTime - when;
-      if (p >= 0 && cam.readyState >= 2) { if (Math.abs(cam.currentTime - (trimA + p)) > 0.12) cam.currentTime = trimA + p; g.drawImage(cam, 0, 0, W, H);
+      if (p >= 0 && cam.readyState >= 2) { if (!cam.paused && !cam.seeking) follow(cam, trimA + p); g.drawImage(cam, 0, 0, W, H);
         // fade da imagem: escurece até o preto
         const alpha = Math.max(fi && p < fi ? 1 - p / fi : 0, fo && p > len - fo ? (p - (len - fo)) / fo : 0);
         if (alpha > 0) { g.fillStyle = "rgba(0,0,0," + Math.min(1, alpha) + ")"; g.fillRect(0, 0, W, H); } }
