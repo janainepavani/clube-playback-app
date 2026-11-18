@@ -118,6 +118,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   let pbSrc = null, offsetAuto = 0;
   let pipVideo = null, pipUrl = URL.createObjectURL(videoBlob), pipPos = null, pipLevel = 0;
   let facing = lsGet("cp-rec-cam") === "environment" ? "environment" : "user";
+  let camCount = 0; // quantas câmeras o aparelho tem (o botão Trocar câmera só aparece com mais de uma)
   const vol = Object.assign({ v: 1, p: 0.8 }, (() => { try { return JSON.parse(lsGet(LS_VOL) || "{}"); } catch (e) { return {}; } })());
   let fix = +(lsGet(LS_FIX) || 0); // correção manual guardada
 
@@ -157,7 +158,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
           <li><b>Lugar:</b> escolha um canto silencioso, com a luz de frente para você (janela à sua frente, não atrás).</li>
           <li><b>Celular:</b> apoie num suporte ou tripé, na altura dos olhos. Em pé para Reels e Status, deitado para YouTube.</li>
           <li><b>Fone:</b> coloque o fone antes de ligar a câmera (veja o quadro abaixo).</li>
-          <li><b>Câmera:</b> toque em Ligar câmera. Arraste o vídeo com letra para onde ficar melhor e toque duas vezes nele para mudar o tamanho. O botão Trocar câmera alterna entre a da frente e a de trás.</li>
+          <li><b>Câmera:</b> toque em Ligar câmera. Arraste o vídeo com letra para onde ficar melhor e toque duas vezes nele para mudar o tamanho. No celular, o botão Trocar câmera alterna entre a da frente e a de trás.</li>
           <li><b>Gravar:</b> toque em Gravar, espere a contagem de 3 e cante. A gravação para sozinha quando a música acaba, ou toque em Parar.</li>
           <li><b>Ajustar:</b> confira com o Play. Acerte o volume da voz e do playback, corte o começo e o fim pelas alças douradas e escolha o fade.</li>
           <li><b>Salvar:</b> toque em Assistir à prévia do vídeo final. Se estiver bom, toque em Salvar vídeo e depois em Salvar ou compartilhar. No iPhone, escolha Salvar vídeo para ir para a galeria.</li>
@@ -204,6 +205,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       return;
     }
     if (closed) return stopCam();
+    try { camCount = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput").length; } catch (e) { camCount = 0; }
     keepAwake();
     showRecord();
   }
@@ -218,7 +220,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
         <div class="st-count" id="stCount"></div>
       </div>
       <button class="btn st-big st-rec-btn" id="stGo">Gravar</button>
-      <button class="btn" id="stFlip">Trocar câmera (agora: ${facing === "user" ? "da frente" : "de trás"})</button>
+      ${camCount > 1 ? `<button class="btn" id="stFlip">Trocar câmera (agora: ${facing === "user" ? "da frente" : "de trás"})</button>` : ""}
       <p class="small muted" style="margin:0;text-align:center">O playback toca no fone e a gravação para sozinha quando a música acaba.</p>`;
     const live = box.querySelector("#stLive"); live.srcObject = camStream; live.play().catch(() => {});
     pipVideo = box.querySelector("#stPip video");
@@ -247,7 +249,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     };
     pip.addEventListener("pointerup", up); pip.addEventListener("pointercancel", () => { drag = null; });
     window.addEventListener("resize", () => { if (box.contains(pip)) place(); });
-    box.querySelector("#stFlip").onclick = flipCam;
+    const flip = box.querySelector("#stFlip"); if (flip) flip.onclick = flipCam;
     box.querySelector("#stGo").onclick = () => recording ? stopRec() : countdown();
   }
 
