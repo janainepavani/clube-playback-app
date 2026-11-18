@@ -22,6 +22,15 @@ service firebase.storage {
         && untilOk();
     }
 
+    // Prints enviados nas mensagens: só a própria pessoa e a Janaine
+    match /support/{uid}/{file} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
+      allow write: if isAdmin()
+        || (request.auth != null && request.auth.uid == uid && isActive()
+            && request.resource.size < 8 * 1024 * 1024
+            && request.resource.contentType.matches('image/.*'));
+    }
+
     // Vídeos, letras e partituras: só assinante ativa lê, só a Janaine envia
     match /songs/{allPaths=**} {
       allow read: if isAdmin() || isActive();

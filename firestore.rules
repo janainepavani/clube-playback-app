@@ -60,6 +60,26 @@ service cloud.firestore {
       }
     }
 
+    // Mensagens (Fale com a Janaine): cada pessoa lê e escreve só a própria conversa; a Janaine vê todas
+    match /support/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if isAdmin()
+        || (signedIn() && request.auth.uid == uid && isActive()
+            && request.resource.data.email == myEmail()
+            && request.resource.data.keys().hasOnly(['email', 'lastAt', 'lastFrom', 'lastText', 'unreadAdmin', 'unreadUser']));
+      allow delete: if isAdmin();
+
+      match /msgs/{mid} {
+        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        allow create: if (isAdmin() && request.resource.data.from == 'admin')
+          || (signedIn() && request.auth.uid == uid && isActive()
+              && request.resource.data.from == 'user'
+              && request.resource.data.text is string
+              && request.resource.data.text.size() <= 4000);
+        allow update, delete: if isAdmin();
+      }
+    }
+
     // Catálogo
     match /songs/{id} {
       allow read: if isActive() || isAdmin();

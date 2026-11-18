@@ -8,14 +8,46 @@ const APP_URL = "https://app.playback.janainepavani.com";
 const WHATS = "https://wa.me/5541998771712";
 const ASSUNTO = "Seu acesso ao app do Trio Playback foi liberado";
 
+const EU = "janaine@janainepavani.com";
+
 function doPost(e) {
   try {
     const d = JSON.parse(e.postData.contents);
-    if (d.k !== CHAVE) return saida("chave");
-    const to = String(d.to || "").trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return saida("email");
-    // evita mandar o mesmo e-mail duas vezes seguidas para a mesma pessoa (10 minutos)
     const cache = CacheService.getScriptCache();
+    const emailOk = x => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x);
+
+    // Mensagem nova de assinante: vai SEMPRE só para a Janaine (por isso não precisa de chave)
+    if (d.tipo === "paraJanaine") {
+      const de = String(d.de || "").trim().toLowerCase();
+      if (!emailOk(de)) return saida("email");
+      if (cache.get("sup:" + de)) return saida("repetido");          // no máximo 1 aviso a cada 2 minutos por pessoa
+      const total = +(cache.get("sup:total") || 0);
+      if (total >= 40) return saida("limite");                         // no máximo 40 avisos por hora
+      cache.put("sup:" + de, "1", 120); cache.put("sup:total", String(total + 1), 3600);
+      const txt = String(d.texto || "").slice(0, 1500);
+      GmailApp.sendEmail(EU, "Nova mensagem no app: " + de,
+        de + " escreveu no app do Trio Playback:\n\n" + (txt || "(sem texto)") + (d.print ? "\n\n[mandou um print, veja no app]" : "") +
+        "\n\nResponda pelo app: " + APP_URL + " (Conta > Painel da Janaine > Mensagens)",
+        { name: "App Trio Playback" });
+      return saida("ok");
+    }
+
+    if (d.k !== CHAVE) return saida("chave");
+
+    // Resposta da Janaine: avisa a assinante que tem resposta no app
+    if (d.tipo === "resposta") {
+      const to = String(d.to || "").trim().toLowerCase();
+      if (!emailOk(to)) return saida("email");
+      if (cache.get("resp:" + to)) return saida("repetido");          // no máximo 1 aviso a cada 5 minutos por pessoa
+      cache.put("resp:" + to, "1", 300);
+      GmailApp.sendEmail(to, "A Janaine respondeu sua mensagem no app",
+        "Olá!\n\nA Janaine respondeu sua mensagem no app do Trio Playback.\n\nPara ler, abra o app e toque em Conta > Fale com a Janaine:\n" + APP_URL + "\n\nUm abraço,\nJanaine Pavani",
+        { name: "Janaine Pavani" });
+      return saida("ok");
+    }
+    const to = String(d.to || "").trim().toLowerCase();
+    if (!emailOk(to)) return saida("email");
+    // evita mandar o mesmo e-mail duas vezes seguidas para a mesma pessoa (10 minutos)
     if (cache.get(to)) return saida("repetido");
     cache.put(to, "1", 600);
     GmailApp.sendEmail(to, ASSUNTO, texto(), { htmlBody: html(), name: "Janaine Pavani" });

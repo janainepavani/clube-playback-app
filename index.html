@@ -106,6 +106,14 @@ nav.tabsbar button[aria-current="page"]{color:var(--cream);background:var(--wine
 .toast{position:fixed;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);background:var(--wine-deep);border:1px solid var(--bronze);padding:10px 16px;border-radius:12px;z-index:40;font-weight:600;opacity:0;transition:opacity .25s;pointer-events:none;max-width:90vw;text-align:center}
 .toast.show{opacity:1}
 .center{text-align:center;padding:40px 6px}
+.chat{display:flex;flex-direction:column;gap:8px}
+.msg{max-width:84%;padding:10px 13px;border-radius:16px;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.me{align-self:flex-end;background:var(--wine);border-bottom-right-radius:4px}
+.msg.them{align-self:flex-start;background:var(--raised);border:1px solid var(--line);border-bottom-left-radius:4px}
+.msg time{display:block;font-size:11px;color:var(--muted);margin-top:4px}
+.msg.me time{color:#efe6d2a0;text-align:right}
+.msg img{max-width:100%;max-height:360px;border-radius:10px;display:block;margin-top:6px}
+textarea.field{resize:vertical;min-height:80px}
 @media (prefers-reduced-motion:reduce){.toast{transition:none}}
 </style>
 </head>

@@ -10,7 +10,7 @@ import {
   onSnapshot, serverTimestamp, addDoc, getDocs
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import {
-  getStorage, ref as sref, getBlob, uploadBytesResumable
+  getStorage, ref as sref, getBlob, uploadBytesResumable, uploadBytes
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -34,7 +34,8 @@ const storage = getStorage(app);
 const S = {
   user: null, profile: null, isAdmin: false, profileFromServer: false,
   songs: [], playlists: [], filter: "all", view: "catalog", songId: null, tab: "video", showKeys: false, addTo: false,
-  plId: null, query: "", saved: new Set(), adminData: null, busy: {}
+  plId: null, query: "", saved: new Set(), adminData: null, busy: {},
+  sup: { unreadUser: false, msgs: [], threads: [], unreadAdmin: 0 }, thread: null, supDraft: ""
 };
 let unsub = [];
 const DAY = 86400000;
@@ -42,13 +43,21 @@ const $ = id => document.getElementById(id);
 const main = $("main");
 // E-mail de aviso quando a Janaine libera o acesso: um script do Google (Apps Script) na conta dela envia o e-mail.
 // O endereço e a chave ficam em private/mail, que só a Janaine lê. O texto do e-mail fica no script (apps-script-email.gs).
-async function sendWelcome(to) {
+async function sendWelcome(to, extra) {
   try {
     const m = (S.adminData && S.adminData.mail) || (await getDoc(doc(db, "private", "mail"))).data();
     if (!m || !m.url || !m.k) return false;
-    await fetch(m.url, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ k: m.k, to }) });
+    await fetch(m.url, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ k: m.k, to, ...(extra || {}) }) });
     return true;
   } catch (e) { return false; }
+}
+// Aviso por e-mail para a Janaine quando chega mensagem (o script manda só para ela, então não precisa de chave)
+async function notifyJanaine(text, hasImg) {
+  try {
+    const c = (await getDoc(doc(db, "config", "support"))).data();
+    if (!c || !c.url) return;
+    await fetch(c.url, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain" }, body: JSON.stringify({ tipo: "paraJanaine", de: (S.user.email || "").toLowerCase(), texto: text, print: !!hasImg }) });
+  } catch (e) {}
 }
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -210,6 +219,29 @@ function startData() {
       first = false; render();
     }, e => console.warn(e)));
   }
+  // mensagens (suporte)
+  if (S.isAdmin) {
+    let firstT = true, seen = new Set();
+    unsub.push(onSnapshot(query(collection(db, "support"), orderBy("lastAt", "desc")), s => {
+      S.sup.threads = s.docs.map(d => ({ uid: d.id, ...d.data() }));
+      const unread = S.sup.threads.filter(t => t.unreadAdmin);
+      const fresh = unread.filter(t => !seen.has(t.uid + "|" + tsMs(t.lastAt)));
+      seen = new Set(unread.map(t => t.uid + "|" + tsMs(t.lastAt)));
+      S.sup.unreadAdmin = unread.length;
+      if (!firstT && fresh.length && !(S.view === "admthread" && fresh.every(t => t.uid === S.thread))) {
+        toast("Nova mensagem de " + fresh[0].email);
+        try { if ("Notification" in window && Notification.permission === "granted") new Notification("Trio Playback", { body: "Nova mensagem de " + fresh[0].email, icon: "icon-192.png" }); } catch (e) {}
+      }
+      firstT = false;
+      if (["account", "admin", "admthread"].includes(S.view) && !adminForm) render(); else updateBadges();
+    }, e => console.warn(e)));
+  } else {
+    unsub.push(onSnapshot(doc(db, "support", S.user.uid), s => {
+      const was = S.sup.unreadUser; S.sup.unreadUser = !!(s.exists() && s.data().unreadUser);
+      if (S.sup.unreadUser && !was && S.view !== "support") toast("A Janaine respondeu sua mensagem. Veja em Conta.");
+      if (was !== S.sup.unreadUser) { if (S.view === "account") render(); else updateBadges(); }
+    }, e => console.warn(e)));
+  }
   unsub.push(onSnapshot(query(collection(db, "songs"), orderBy("name")), s => {
     S.songs = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => norm(a.name).localeCompare(norm(b.name)) || fmtOf(a).localeCompare(fmtOf(b)) * -1);
     render();
@@ -253,23 +285,31 @@ function setConn() { const c = $("conn"); c.textContent = navigator.onLine ? "On
 window.addEventListener("online", () => { setConn(); render(); });
 window.addEventListener("offline", () => { setConn(); render(); });
 
+function updateBadges() {
+  const contaBtn = document.querySelector('#nav button[data-v="account"]');
+  const n = S.isAdmin ? (S.pendingCount || 0) + (S.sup.unreadAdmin || 0) : (S.sup.unreadUser ? 1 : 0);
+  if (contaBtn) contaBtn.innerHTML = "Conta" + (n ? ` <span class="pill warn" style="margin-left:4px">${n}</span>` : "");
+  document.querySelectorAll("#nav button").forEach(b => b.setAttribute("aria-current", (b.dataset.v === S.view || (S.view === "song" && b.dataset.v === "catalog") || (S.view === "playlist" && b.dataset.v === "playlists") || (S.view === "support" && b.dataset.v === "account")) ? "page" : "false"));
+}
 function render() {
   setConn();
   const st = S.profile && S.profile.status;
   const inApp = S.user && (S.isAdmin || st === "active") && !untilPassed() && !(!navigator.onLine && checkExpired());
-  $("dock").hidden = !inApp || S.view === "admin";
-  const contaBtn = document.querySelector('#nav button[data-v="account"]');
-  if (contaBtn) contaBtn.innerHTML = "Conta" + (S.isAdmin && S.pendingCount ? ` <span class="pill warn" style="margin-left:4px">${S.pendingCount}</span>` : "");
-  document.querySelectorAll("#nav button").forEach(b => b.setAttribute("aria-current", (b.dataset.v === S.view || (S.view === "song" && b.dataset.v === "catalog") || (S.view === "playlist" && b.dataset.v === "playlists")) ? "page" : "false"));
+  $("dock").hidden = !inApp || S.view === "admin" || S.view === "admthread";
+  updateBadges();
+  if (S.view !== "support" && S.view !== "admthread") stopMsgs();
   if (!S.user) return paint(viewLogin());
   if (!S.profile && !S.isAdmin) return paint(`<div class="center muted">Carregando sua conta...</div>`);
   if (!navigator.onLine && checkExpired()) return paint(viewExpired());
   if (!S.isAdmin && st === "pending") return paint(viewPending());
   if (!S.isAdmin && st !== "active") return paint(viewBlocked());
   if (untilPassed()) return paint(viewUntilEnded());
-  const v = { catalog: viewCatalog, song: viewSong, playlists: viewPlaylists, playlist: viewPlaylist, account: viewAccount, admin: viewAdmin }[S.view] || viewCatalog;
+  const v = { catalog: viewCatalog, song: viewSong, playlists: viewPlaylists, playlist: viewPlaylist, account: viewAccount, admin: viewAdmin, support: viewSupport, admthread: viewAdmThread }[S.view] || viewCatalog;
+  const typing = document.activeElement && document.activeElement.id === "supText";
   paint(v());
+  if (typing && $("supText")) { const t = $("supText"); t.focus(); try { t.setSelectionRange(t.value.length, t.value.length); } catch (e) {} }
   if (S.view === "song") mountSong();
+  if (S.view === "support" || S.view === "admthread") mountChat();
 }
 // repinta sem destruir o vídeo que está tocando
 function paint(html) {
@@ -507,11 +547,121 @@ function viewAccount() {
       <p class="small muted" style="margin:0">${S.saved.size} ${S.saved.size === 1 ? "tom salvo" : "tons salvos"} neste aparelho.</p>
       <div class="hrow">${S.saved.size ? `<button class="btn sm" data-a="wipe">Apagar tudo do aparelho</button>` : ""}<button class="btn sm" data-a="logout">Sair</button></div>
     </div>
-    ${(S.user.email || "").toLowerCase() === ADMIN_EMAIL ? (S.isAdmin ? `<button class="btn primary" data-a="nav" data-v="admin">Abrir o Painel da Janaine${S.pendingCount ? "  ·  " + S.pendingCount + (S.pendingCount === 1 ? " pedido novo" : " pedidos novos") : ""}</button>
+    ${S.isAdmin ? "" : `<button class="card" data-a="nav" data-v="support" style="text-align:left;cursor:pointer;color:inherit">
+      <div class="hrow spread" style="width:100%"><b>Fale com a Janaine</b>${S.sup.unreadUser ? `<span class="pill warn">Resposta nova</span>` : ""}</div>
+      <span class="small muted">Dúvidas, sugestões e problemas no app. Pode mandar print da tela.</span></button>`}
+    ${(S.user.email || "").toLowerCase() === ADMIN_EMAIL ? (S.isAdmin ? `<button class="btn primary" data-a="nav" data-v="admin">Abrir o Painel da Janaine${S.pendingCount ? "  ·  " + S.pendingCount + (S.pendingCount === 1 ? " pedido novo" : " pedidos novos") : ""}${S.sup.unreadAdmin ? "  ·  " + S.sup.unreadAdmin + (S.sup.unreadAdmin === 1 ? " mensagem nova" : " mensagens novas") : ""}</button>
       ${"Notification" in window && Notification.permission !== "granted" ? `<button class="btn sm" data-a="notif">Receber aviso no aparelho quando chegar pedido</button>` : ""}`
       : `<div class="card"><b>Confirme seu e-mail para abrir o painel</b><p class="small muted" style="margin:0">Por segurança, o painel só abre depois que você confirma o e-mail ${ADMIN_EMAIL}.</p>
         <div class="hrow"><button class="btn sm" data-a="verify">Enviar e-mail de confirmação</button><button class="btn sm" data-a="verified">Já confirmei</button></div></div>`) : ""}
   </div>`;
+}
+
+/* ---------------- mensagens (suporte) ---------------- */
+const fmtWhen = ms => { const d = new Date(ms), t = new Date(); const hm = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); return d.toDateString() === t.toDateString() ? hm : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " " + hm; };
+let supUnsub = null, supKey = null, supFile = null, supSending = false;
+function watchMsgs(uid) {
+  if (supKey === uid) return;
+  stopMsgs(); supKey = uid; S.sup.msgs = []; S.sup.loading = true;
+  supUnsub = onSnapshot(query(collection(db, "support", uid, "msgs"), orderBy("at")), s => {
+    S.sup.msgs = s.docs.map(d => ({ id: d.id, ...d.data() })); S.sup.loading = false;
+    if (S.view === "support" || S.view === "admthread") { render(); markRead(uid); }
+  }, e => { console.warn(e); S.sup.loading = false; S.sup.err = true; render(); });
+}
+function stopMsgs() { if (supUnsub) supUnsub(); supUnsub = null; supKey = null; S.sup.err = false; }
+async function markRead(uid) {
+  try {
+    if (S.isAdmin) { const t = S.sup.threads.find(x => x.uid === uid); if (t && t.unreadAdmin) await setDoc(doc(db, "support", uid), { unreadAdmin: false }, { merge: true }); }
+    else if (S.sup.unreadUser) await setDoc(doc(db, "support", uid), { unreadUser: false }, { merge: true });
+  } catch (e) {}
+}
+function chatHtml(meIsAdmin) {
+  if (S.sup.err) return `<p class="note">Não consegui abrir as mensagens. Confira a internet e tente de novo.</p>`;
+  if (S.sup.loading) return `<p class="muted small">Carregando...</p>`;
+  if (!S.sup.msgs.length) return `<p class="muted small">${meIsAdmin ? "Nenhuma mensagem." : "Nenhuma mensagem ainda. Escreva abaixo: dúvidas, sugestões ou o que não funcionou. Se puder, mande um print da tela."}</p>`;
+  return `<div class="chat">${S.sup.msgs.map(m => { const mine = (m.from === "admin") === meIsAdmin; return `<div class="msg ${mine ? "me" : "them"}">${m.text ? esc(m.text) : ""}${m.img ? `<div class="supimg" data-img="${esc(m.img)}"><span class="small muted">Carregando print...</span></div>` : ""}<time>${mine ? "Você" : (meIsAdmin ? "Assinante" : "Janaine")}${m.at ? "  ·  " + fmtWhen(tsMs(m.at)) : ""}</time></div>`; }).join("")}</div>`;
+}
+function composerHtml() {
+  return `<form class="card" id="supForm" style="gap:10px">
+    <textarea class="field" id="supText" rows="3" maxlength="4000" placeholder="Escreva sua mensagem" aria-label="Mensagem">${esc(S.supDraft)}</textarea>
+    <div class="hrow spread"><label class="btn sm" style="cursor:pointer;color:var(--cream)">${supFile ? "Trocar print" : "Anexar print"}<input type="file" id="supImg" accept="image/*" hidden></label>
+      ${supFile ? `<span class="small muted" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(supFile.name)}</span><button class="link" type="button" data-a="supnofile">Tirar</button>` : ""}
+      <button class="btn primary" type="submit" ${supSending ? "disabled" : ""}>${supSending ? "Enviando..." : "Enviar"}</button></div>
+  </form>`;
+}
+function viewSupport() {
+  watchMsgs(S.user.uid);
+  return `<button class="link" data-a="nav" data-v="account">Voltar à conta</button>
+  <div class="stack" style="margin-top:12px">
+    <h1 class="title">Fale com a Janaine</h1>
+    <p class="small muted" style="margin:0">A resposta aparece aqui, e você também recebe um aviso por e-mail.</p>
+    ${chatHtml(false)}
+    ${composerHtml()}
+  </div>`;
+}
+function viewAdmThread() {
+  if (!S.isAdmin || !S.thread) { S.view = "admin"; return viewAdmin(); }
+  watchMsgs(S.thread);
+  const t = S.sup.threads.find(x => x.uid === S.thread) || {};
+  return `<button class="link" data-a="nav" data-v="admin">Voltar ao painel</button>
+  <div class="stack" style="margin-top:12px">
+    <h1 class="title" style="font-size:22px;overflow-wrap:anywhere">${esc(t.email || "Conversa")}</h1>
+    <p class="small muted" style="margin:0">Quando você responde, a pessoa recebe um aviso por e-mail.</p>
+    ${chatHtml(true)}
+    ${composerHtml()}
+  </div>`;
+}
+const imgUrlCache = new Map();
+function mountChat() {
+  document.querySelectorAll(".supimg[data-img]").forEach(async el => {
+    const path = el.dataset.img;
+    try {
+      let url = imgUrlCache.get(path);
+      if (!url) { url = URL.createObjectURL(await getBlob(sref(storage, path))); imgUrlCache.set(path, url); }
+      el.innerHTML = `<a href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="Print enviado"></a>`;
+    } catch (e) { el.innerHTML = `<span class="small muted">Não consegui abrir o print.</span>`; }
+  });
+  // desce até a última mensagem só quando chega mensagem nova (não a cada atualização)
+  const n = S.sup.msgs.length, key = (S.view === "admthread" ? S.thread : "me") + "|" + n;
+  const last = main.querySelector(".chat .msg:last-child");
+  if (last && mountChat.key !== key) { mountChat.key = key; last.scrollIntoView({ block: "center" }); }
+}
+// reduz o print antes de enviar (até 1600 px, JPEG)
+async function shrinkImage(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    return await new Promise(r => c.toBlob(b => r(b || file), "image/jpeg", 0.85));
+  } catch (e) { return file; }
+}
+async function sendSupport() {
+  if (supSending) return;
+  const uid = S.isAdmin ? S.thread : S.user.uid; if (!uid) return;
+  const text = (($("supText") && $("supText").value) || "").trim();
+  if (!text && !supFile) return toast("Escreva a mensagem ou anexe um print.");
+  supSending = true; S.supDraft = text; render();
+  try {
+    let img = null;
+    if (supFile) {
+      const blob = await shrinkImage(supFile);
+      img = `support/${uid}/${Date.now().toString(36)}.jpg`;
+      await uploadBytes(sref(storage, img), blob, { contentType: "image/jpeg" });
+    }
+    await addDoc(collection(db, "support", uid, "msgs"), { from: S.isAdmin ? "admin" : "user", text, img, at: serverTimestamp() });
+    const last = text ? text.slice(0, 140) : "Print";
+    if (S.isAdmin) {
+      await setDoc(doc(db, "support", uid), { lastAt: serverTimestamp(), lastFrom: "admin", lastText: last, unreadUser: true, unreadAdmin: false }, { merge: true });
+      const t = S.sup.threads.find(x => x.uid === uid); if (t && t.email) sendWelcome(t.email, { tipo: "resposta" });
+    } else {
+      await setDoc(doc(db, "support", uid), { email: (S.user.email || "").toLowerCase(), lastAt: serverTimestamp(), lastFrom: "user", lastText: last, unreadAdmin: true, unreadUser: false }, { merge: true });
+      notifyJanaine(text, !!img);
+    }
+    S.supDraft = ""; supFile = null;
+    toast(S.isAdmin ? "Resposta enviada." : "Mensagem enviada. A Janaine recebe um aviso.");
+  } catch (e) { console.warn(e); toast("Não consegui enviar: " + (e.code || e.message) + ". Confira a internet."); }
+  supSending = false; render();
 }
 
 /* ---------------- Painel da Janaine ---------------- */
@@ -534,6 +684,8 @@ async function loadAdmin() {
     mail: mail && mail.exists() ? mail.data() : null,
     mailRules: mail !== null
   };
+  // o endereço do script também vai para config/support (sem a chave), para o aviso de mensagem nova
+  try { const m = S.adminData.mail; if (m && m.url) { const c = await getDoc(doc(db, "config", "support")); if (!c.exists() || c.data().url !== m.url) await setDoc(doc(db, "config", "support"), { url: m.url }); } } catch (e) {}
   render();
 }
 function viewAdmin() {
@@ -545,6 +697,9 @@ function viewAdmin() {
   <div class="stack admin" style="margin-top:12px">
     <div class="hrow spread"><h1 class="title">Painel da Janaine</h1><button class="btn sm" data-a="adminreload">Atualizar</button></div>
     ${A.hasKey ? "" : `<div class="card"><b>Ative o modo offline</b><p class="small muted" style="margin:0">Cria a chave que embaralha os vídeos salvos nos aparelhos. Faça isso uma vez só.</p><button class="btn primary" data-a="mkkey">Ativar modo offline</button></div>`}
+    <div class="card"><div class="hrow spread"><b>Mensagens</b><span class="pill ${S.sup.unreadAdmin ? "warn" : ""}">${S.sup.unreadAdmin ? S.sup.unreadAdmin + (S.sup.unreadAdmin === 1 ? " nova" : " novas") : S.sup.threads.length}</span></div>
+      ${S.sup.threads.length ? `<div class="list">${S.sup.threads.map(t => `<button class="row" data-a="openthread" data-uid="${t.uid}" ${t.unreadAdmin ? 'style="border-color:var(--warn)"' : ""}><span class="name">${esc(t.email)}<br><span class="small muted" style="font-weight:500">${t.lastFrom === "admin" ? "Você: " : ""}${esc(t.lastText || "")}</span></span><span class="meta">${t.unreadAdmin ? `<span class="pill warn">nova</span>` : ""}<span class="small muted">${t.lastAt ? fmtWhen(tsMs(t.lastAt)) : ""}</span></span></button>`).join("")}</div>` : `<p class="small muted" style="margin:0">Nenhuma mensagem ainda.</p>`}
+    </div>
     <div class="card"><div class="hrow spread"><b>Pedidos de acesso</b><span class="pill ${A.pending.length ? "warn" : ""}">${A.pending.length}</span></div>
       ${A.pending.length ? `<div class="list">${A.pending.map(u => `<div class="row"><span class="name">${esc(u.email)}</span><span class="meta"><button class="btn sm primary" data-a="approve" data-uid="${u.uid}" data-em="${esc(u.email)}">Liberar</button><button class="btn sm danger" data-a="deny" data-uid="${u.uid}">Recusar</button></span></div>`).join("")}</div>` : `<p class="small muted" style="margin:0">Nenhum pedido esperando.</p>`}
     </div>
@@ -785,6 +940,8 @@ document.addEventListener("click", async e => {
         mod.openStudio({ song: s, keyName: k, videoBlob: blob, email: S.user.email, toast });
       } finally { el.disabled = false; el.textContent = "Gravar"; }
     }
+    else if (a === "openthread") { S.thread = el.dataset.uid; S.view = "admthread"; S.supDraft = ""; supFile = null; render(); window.scrollTo(0, 0); }
+    else if (a === "supnofile") { supFile = null; render(); }
     else if (a === "present") openPres();
     else if (a === "closepres") closePres();
     else if (a === "pgo") { presIdx += +el.dataset.d; presReady = false; presSheet = 0; presKeys = false; renderPres(); }
@@ -807,7 +964,7 @@ document.addEventListener("click", async e => {
     else if (a === "adminreload") { S.adminData = null; render(); }
     else if (a === "mkkey") { const k = crypto.getRandomValues(new Uint8Array(32)); await setDoc(doc(db, "config", "offline"), { k: b64.to(k), createdAt: serverTimestamp() }); toast("Modo offline ativado."); S.adminData = null; render(); }
     else if (a === "approve") { const em = el.dataset.em; await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp() }, { merge: true }); await updateDoc(doc(db, "users", el.dataset.uid), { status: "active", activatedAt: serverTimestamp() }); const mailed = await sendWelcome(em); toast("Acesso liberado para " + em + (mailed ? ". E-mail de aviso enviado." : ". Sem e-mail de aviso: avise a pessoa você mesma.")); S.adminData = null; render(); }
-    else if (a === "savemail") { const url = $("mailurl").value.trim(), k = $("mailkey").value.trim(); if (!/^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/.+\/exec$/.test(url)) return toast("O endereço precisa começar com https://script.google.com e terminar com /exec."); if (!k) return toast("Cole a chave."); try { await setDoc(doc(db, "private", "mail"), { url, k, savedAt: serverTimestamp() }); toast("Salvo. O e-mail de aviso está ligado."); } catch (e) { toast("Não salvou. Confira se as regras do Firestore foram atualizadas."); } S.adminData = null; render(); }
+    else if (a === "savemail") { const url = $("mailurl").value.trim(), k = $("mailkey").value.trim(); if (!/^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/.+\/exec$/.test(url)) return toast("O endereço precisa começar com https://script.google.com e terminar com /exec."); if (!k) return toast("Cole a chave."); try { await setDoc(doc(db, "private", "mail"), { url, k, savedAt: serverTimestamp() }); await setDoc(doc(db, "config", "support"), { url }); toast("Salvo. O e-mail de aviso está ligado."); } catch (e) { toast("Não salvou. Confira se as regras do Firestore foram atualizadas."); } S.adminData = null; render(); }
     else if (a === "testmail") { const ok = await sendWelcome(ADMIN_EMAIL); toast(ok ? "Teste enviado. Confira sua caixa de entrada." : "Não deu para enviar o teste."); }
     else if (a === "deny") { await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Pedido recusado."); S.adminData = null; render(); }
     else if (a === "revoke") { const em = el.dataset.em; await deleteDoc(doc(db, "allowed", em)).catch(() => {}); await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Acesso retirado de " + em + ". O conteúdo salvo some na próxima conexão dela."); S.adminData = null; render(); }
@@ -868,9 +1025,11 @@ document.addEventListener("submit", async e => {
       const r = await addDoc(collection(db, "users", S.user.uid, "playlists"), { name, items: f.id === "newPlFromSong" ? [S.songId] : [], updatedAt: serverTimestamp() });
       toast("Playlist " + name + " criada."); if (f.id === "newPl") { S.plId = r.id; S.view = "playlist"; render(); }
     } else if (f.id === "songForm") await submitSong();
+    else if (f.id === "supForm") await sendSupport();
   } catch (err) { console.warn(err); toast(AUTH_ERR[err.code] || "Algo deu errado: " + (err.code || err.message)); }
 });
 document.addEventListener("change", async e => {
+  if (e.target.id === "supImg") { const f = e.target.files[0]; if (f) { if (f.size > 25 * 1048576) return toast("Imagem grande demais."); supFile = f; S.supDraft = ($("supText") || {}).value || S.supDraft; render(); } return; }
   const em = e.target.dataset && e.target.dataset.untilEm;
   if (!em || !S.isAdmin) return;
   const v = e.target.value; const until = v ? new Date(v + "T23:59:59-03:00") : null;
@@ -878,6 +1037,7 @@ document.addEventListener("change", async e => {
   catch (err) { toast("Não salvou o prazo: " + (err.code || err.message)); }
 });
 document.addEventListener("input", e => {
+  if (e.target.id === "supText") { S.supDraft = e.target.value; return; }
   if (e.target.id === "q") { S.query = e.target.value; const pos = e.target.selectionStart; render(); const q = $("q"); if (q) { q.focus(); try { q.setSelectionRange(pos, pos); } catch (_) {} } }
 });
 
