@@ -386,6 +386,11 @@ function viewSong() {
       ${S.addTo ? `<div class="list">${S.playlists.map(p => { const has = (p.items || []).includes(s.id); return `<button class="row" data-a="addpl" data-pl="${p.id}" ${has ? "disabled" : ""}><span class="name">${esc(p.name)}</span><span class="pill ${has ? "ok" : ""}">${has ? "Já está" : (p.items || []).length + " músicas"}</span></button>`; }).join("")}
         <form class="hrow" id="newPlFromSong"><input class="field" style="flex:1" id="newPlName" placeholder="Nome da nova playlist" aria-label="Nome da nova playlist"><button class="btn sm" type="submit">Criar e adicionar</button></form></div>` : ""}
     </div>
+    ${S.isAdmin ? `<div class="card" style="border-color:var(--bronze)">
+      <div class="hrow spread"><b>Gravar meu vídeo</b><span class="pill brass">teste, só você vê</span></div>
+      <p class="small muted" style="margin:0">Grave você cantando com o playback do tom ${esc(k)} no fone. Depois ajuste o volume da voz e do playback, acerte a sincronia e salve o vídeo.</p>
+      <button class="btn primary" data-a="record" ${available(s.id) ? "" : "disabled"}>Gravar</button>
+    </div>` : ""}
     <div class="card">
       <div class="hrow spread"><b>Usar sem internet</b>
         ${canOffline() ? (off ? `<button class="btn sm" data-a="unsave" data-id="${s.id}">Remover do aparelho</button>` : `<button class="btn sm primary" data-a="save" data-id="${s.id}" ${busy !== undefined || !navigator.onLine ? "disabled" : ""}>${busy !== undefined ? "Salvando " + Math.round(busy * 100) + "%" : "Salvar no aparelho"}</button>`) : ""}</div>
@@ -767,6 +772,16 @@ document.addEventListener("click", async e => {
     else if (a === "mv") { const p = getPl(S.plId); const it = (p.items || []).filter(byId); const i = +el.dataset.i, j = i + +el.dataset.d; [it[i], it[j]] = [it[j], it[i]]; await savePlItems(p, it); }
     else if (a === "rm") { const p = getPl(S.plId); const it = (p.items || []).filter(byId); it.splice(+el.dataset.i, 1); await savePlItems(p, it); }
     else if (a === "savepl") { const p = getPl(S.plId); for (const id of (p.items || []).filter(byId)) { const s = byId(id); await saveSong(s, keyOf(s)); } toast("Playlist salva no aparelho."); }
+    else if (a === "record") {
+      const s = byId(S.songId); const k = keyOf(s); const kd = keyData(s, k); const offId = s.id + "|" + k;
+      const v = main.querySelector("#vbox video"); if (v) v.pause();
+      el.disabled = true; el.textContent = "Abrindo...";
+      try {
+        const [mod, blob] = await Promise.all([import("./gravar.js"), fileBlob(kd.video, S.saved.has(offId) ? offId + "|video" : null)]);
+        if (!blob) return toast("Não consegui abrir o playback agora.");
+        mod.openStudio({ song: s, keyName: k, videoBlob: blob, email: S.user.email, toast });
+      } finally { el.disabled = false; el.textContent = "Gravar"; }
+    }
     else if (a === "present") openPres();
     else if (a === "closepres") closePres();
     else if (a === "pgo") { presIdx += +el.dataset.d; presReady = false; presSheet = 0; presKeys = false; renderPres(); }

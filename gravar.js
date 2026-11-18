@@ -1,0 +1,408 @@
+// Estúdio de gravação: a cantora grava a própria voz e a câmera com o playback no fone.
+// O app guarda duas faixas separadas (câmera + voz, e o áudio limpo do playback),
+// deixa ajustar volume e sincronia, e depois junta tudo num vídeo só.
+//
+// Linha do tempo: "offset" = em que segundo da gravação da câmera o playback começa.
+// Na mixagem final, a voz e a imagem começam em 0 e o playback entra em "offset".
+
+const LS_FIX = "cp-rec-fix";   // ajuste de sincronia que a pessoa fez (fica guardado no aparelho)
+const LS_VOL = "cp-rec-vol";
+
+let ctx = null;
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+const fmtT = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return m + ":" + String(Math.floor(s % 60)).padStart(2, "0"); };
+const ms = s => (s >= 0 ? "+" : "−") + Math.round(Math.abs(s) * 1000) + " ms";
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const escH = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+
+function audioCtx() {
+  if (!ctx || ctx.state === "closed") ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === "suspended") ctx.resume();
+  return ctx;
+}
+function pickMime() {
+  const opts = ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4", "video/webm;codecs=vp8,opus", "video/webm"];
+  for (const m of opts) { try { if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
+  return "";
+}
+// envelope de volume (picos) para desenhar a onda: RATE pontos por segundo
+const RATE = 200;
+function envelope(buf) {
+  const ch = buf.getChannelData(0), ch2 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
+  const step = Math.max(1, Math.floor(buf.sampleRate / RATE)); const n = Math.ceil(ch.length / step);
+  const out = new Float32Array(n); let max = 0;
+  for (let i = 0; i < n; i++) {
+    let m = 0; const end = Math.min(ch.length, (i + 1) * step);
+    for (let j = i * step; j < end; j++) { const v = Math.abs(ch[j]) + (ch2 ? Math.abs(ch2[j]) : 0); if (v > m) m = v; }
+    out[i] = m; if (m > max) max = m;
+  }
+  if (max > 0) for (let i = 0; i < n; i++) out[i] /= max;
+  return out;
+}
+
+const CSS = `
+.st{position:fixed;inset:0;z-index:30;background:#060505;color:var(--cream);overflow:auto;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.st-in{max-width:960px;margin:0 auto;padding:14px 16px 30px;display:flex;flex-direction:column;gap:14px}
+.st-cam{position:relative;background:#000;border-radius:14px;overflow:hidden;display:grid;place-items:center;min-height:200px;max-height:72vh}
+.st-cam video.cam{width:100%;max-height:72vh;object-fit:contain;display:block;transform:scaleX(-1)}
+.st-pip{position:absolute;width:38%;max-width:260px;border-radius:10px;overflow:hidden;box-shadow:0 6px 20px #000d;border:1px solid #ffffff30;background:#000;cursor:pointer;transition:all .2s}
+.st-pip video{width:100%;display:block}
+.st-pip.tr{top:10px;right:10px}.st-pip.tl{top:10px;left:10px}.st-pip.br{bottom:10px;right:10px}.st-pip.bl{bottom:10px;left:10px}
+.st-pip.big{width:62%;max-width:420px}
+.st-rec{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:#b3261e;color:#fff;font-weight:700;font-size:14px;padding:4px 12px;border-radius:99px;display:none}
+.st-rec.on{display:block}
+.st-count{position:absolute;inset:0;display:none;place-items:center;font-size:96px;font-weight:700;color:#fff;text-shadow:0 4px 20px #000}
+.st-count.on{display:grid}
+.st-big{font-size:18px;padding:16px;border-radius:14px}
+.st-rec-btn{background:#b3261e;border-color:#b3261e;color:#fff}
+.lanes{display:flex;flex-direction:column;gap:6px;user-select:none;-webkit-user-select:none;touch-action:none}
+.lane{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.lane canvas{display:block;width:100%;height:64px}
+.lane span{position:absolute;left:8px;top:4px;font-size:11px;font-weight:600;color:var(--muted);pointer-events:none}
+.lane.drag{border-color:var(--bronze);cursor:grab}
+.lane.drag:active{cursor:grabbing}
+.mixrow{display:grid;grid-template-columns:90px 1fr 48px;align-items:center;gap:10px}
+.mixrow input{width:100%;accent-color:var(--bronze)}
+.mixrow output{font-variant-numeric:tabular-nums;text-align:right;font-size:14px;color:var(--muted)}
+.nudges{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+.nudges .btn{min-width:64px}
+.syncval{font-variant-numeric:tabular-nums;font-weight:700;color:var(--bronze)}
+.st-result video{width:100%;max-height:70vh;background:#000;border-radius:12px;display:block}
+`;
+
+export async function openStudio({ song, keyName, videoBlob, email, toast }) {
+  if (!document.getElementById("st-css")) { const s = el("style"); s.id = "st-css"; s.textContent = CSS; document.head.appendChild(s); }
+  const root = el("div", "st"); const box = el("div", "st-in"); root.appendChild(box); document.body.appendChild(root);
+  document.body.style.overflow = "hidden";
+
+  let camStream = null, recorder = null, chunks = [], wake = null, closed = false;
+  let pbBuf = null, voiceBuf = null, recBlob = null, recUrl = null, recDur = 0;
+  let pbSrc = null, offsetAuto = 0;
+  let pipVideo = null, pipUrl = URL.createObjectURL(videoBlob), pipCorner = "tr";
+  const vol = Object.assign({ v: 1, p: 0.8 }, (() => { try { return JSON.parse(lsGet(LS_VOL) || "{}"); } catch (e) { return {}; } })());
+  let fix = +(lsGet(LS_FIX) || 0); // correção manual guardada
+
+  async function keepAwake() { try { if ("wakeLock" in navigator) wake = await navigator.wakeLock.request("screen"); } catch (e) {} }
+  function stopCam() { if (camStream) camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  function close() {
+    closed = true; try { if (pbSrc) pbSrc.stop(); } catch (e) {} stopPreview(); stopCam();
+    try { if (recorder && recorder.state !== "inactive") recorder.stop(); } catch (e) {}
+    try { if (wake) wake.release(); } catch (e) {}
+    try { if (navigator.audioSession) navigator.audioSession.type = "auto"; } catch (e) {}
+    URL.revokeObjectURL(pipUrl); if (recUrl) URL.revokeObjectURL(recUrl);
+    root.remove(); document.body.style.overflow = "";
+  }
+  const header = sub => `<div class="hrow spread"><div><div class="small muted">Gravar meu vídeo  ·  tom ${escH(keyName)}</div><div style="font-size:22px;font-weight:700;line-height:1.15">${escH(song.name)}</div>${sub ? `<div class="small muted">${sub}</div>` : ""}</div><button class="btn sm" data-st="close">Fechar</button></div>`;
+  root.addEventListener("click", e => { const b = e.target.closest("[data-st]"); if (b && b.dataset.st === "close") { if (!recBlob || confirm("Sair e descartar esta gravação?")) close(); } });
+
+  /* ---------- 1. preparar ---------- */
+  box.innerHTML = header() + `<div class="empty">Preparando o playback...</div>`;
+  try {
+    const c = audioCtx();
+    pbBuf = await c.decodeAudioData(await videoBlob.arrayBuffer());
+  } catch (e) {
+    console.warn(e);
+    box.innerHTML = header() + `<div class="empty">Não consegui preparar o áudio deste playback neste aparelho. Avise a Janaine.</div>`;
+    return;
+  }
+  if (closed) return;
+  showSetup();
+
+  function showSetup() {
+    box.innerHTML = header() + `
+      <div class="note">Use <b>fone de ouvido com fio</b>. Assim o microfone pega só a sua voz, e o playback entra limpo no vídeo. Fone Bluetooth atrasa o som.</div>
+      <div class="note">Escolha agora a posição do celular, em pé ou deitado. O vídeo sai do mesmo jeito.</div>
+      <div class="st-cam" id="stCam"><div class="empty" style="width:100%">Toque em Ligar câmera</div></div>
+      <button class="btn primary st-big" id="stOn">Ligar câmera e microfone</button>`;
+    box.querySelector("#stOn").onclick = startCam;
+  }
+
+  async function startCam() {
+    const btn = box.querySelector("#stOn"); btn.disabled = true; btn.textContent = "Ligando...";
+    try {
+      try { if (navigator.audioSession) navigator.audioSession.type = "play-and-record"; } catch (e) {}
+      audioCtx();
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
+      });
+    } catch (e) {
+      console.warn(e); btn.disabled = false; btn.textContent = "Tentar de novo";
+      toast("Não consegui abrir a câmera e o microfone. Permita o acesso nas configurações do aparelho.");
+      return;
+    }
+    if (closed) return stopCam();
+    keepAwake();
+    showRecord();
+  }
+
+  /* ---------- 2. gravar ---------- */
+  function showRecord() {
+    box.innerHTML = header("Toque no vídeo pequeno para mudar de canto. Toque duas vezes para aumentar.") + `
+      <div class="st-cam" id="stCam">
+        <video class="cam" id="stLive" playsinline muted autoplay></video>
+        <div class="st-pip ${pipCorner}" id="stPip"><video playsinline muted preload="auto" src="${pipUrl}"></video></div>
+        <div class="st-rec" id="stRecTag">● Gravando 0:00</div>
+        <div class="st-count" id="stCount"></div>
+      </div>
+      <button class="btn st-big st-rec-btn" id="stGo">Gravar</button>
+      <p class="small muted" style="margin:0;text-align:center">O playback toca no fone e a gravação para sozinha quando a música acaba.</p>`;
+    const live = box.querySelector("#stLive"); live.srcObject = camStream; live.play().catch(() => {});
+    pipVideo = box.querySelector("#stPip video");
+    const pip = box.querySelector("#stPip"); let lastTap = 0;
+    pip.onclick = () => {
+      const now = Date.now();
+      if (now - lastTap < 300) { pip.classList.toggle("big"); lastTap = 0; return; }
+      lastTap = now;
+      setTimeout(() => { if (lastTap !== now) return; const order = ["tr", "br", "bl", "tl"]; pip.classList.remove(pipCorner); pipCorner = order[(order.indexOf(pipCorner) + 1) % 4]; pip.classList.add(pipCorner); }, 310);
+    };
+    box.querySelector("#stGo").onclick = () => recording ? stopRec() : countdown();
+  }
+
+  let recording = false, recT0 = 0, tick = null;
+  function countdown() {
+    const go = box.querySelector("#stGo"); go.disabled = true;
+    const c = box.querySelector("#stCount"); let n = 3; c.textContent = n; c.classList.add("on");
+    const t = setInterval(() => { n--; if (n > 0) c.textContent = n; else { clearInterval(t); c.classList.remove("on"); startRec(); } }, 800);
+  }
+  function startRec() {
+    const mime = pickMime(); chunks = [];
+    try { recorder = new MediaRecorder(camStream, mime ? { mimeType: mime, videoBitsPerSecond: 4_000_000, audioBitsPerSecond: 192_000 } : undefined); }
+    catch (e) { toast("Este aparelho não grava vídeo pelo navegador."); return; }
+    recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.onstop = onRecorded;
+    const c = audioCtx();
+    recorder.onstart = () => {
+      recT0 = performance.now();
+      // o playback começa um instante depois da câmera, num tempo conhecido do relógio de áudio
+      const lead = 0.35; const when = c.currentTime + lead;
+      pbSrc = c.createBufferSource(); pbSrc.buffer = pbBuf; pbSrc.connect(c.destination);
+      pbSrc.start(when);
+      const ts = c.getOutputTimestamp ? c.getOutputTimestamp() : null;
+      const ctxNowPerf = ts && ts.performanceTime ? ts.performanceTime + (c.currentTime - ts.contextTime) * 1000 : performance.now();
+      const pbStartPerf = ctxNowPerf + lead * 1000;
+      const outLat = (c.outputLatency || 0) + (c.baseLatency || 0);
+      offsetAuto = (pbStartPerf - recT0) / 1000 + outLat + 0.01;
+      setTimeout(() => { if (pipVideo) { pipVideo.currentTime = 0; pipVideo.play().catch(() => {}); } }, lead * 1000);
+      pbSrc.onended = () => { if (recording) setTimeout(stopRec, 1200); };
+      recording = true;
+      const go = box.querySelector("#stGo"); go.disabled = false; go.textContent = "Parar";
+      const tag = box.querySelector("#stRecTag"); tag.classList.add("on");
+      tick = setInterval(() => { tag.textContent = "● Gravando " + fmtT((performance.now() - recT0) / 1000); }, 250);
+    };
+    recorder.start(1000);
+  }
+  function stopRec() {
+    if (!recording) return; recording = false; clearInterval(tick);
+    recDur = (performance.now() - recT0) / 1000;
+    try { pbSrc.onended = null; pbSrc.stop(); } catch (e) {}
+    if (pipVideo) pipVideo.pause();
+    try { recorder.stop(); } catch (e) {}
+    box.innerHTML = header() + `<div class="empty">Preparando a sua gravação...</div>`;
+  }
+  async function onRecorded() {
+    stopCam();
+    recBlob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "video/mp4" }); chunks = [];
+    recUrl = URL.createObjectURL(recBlob);
+    try { voiceBuf = await audioCtx().decodeAudioData(await recBlob.arrayBuffer()); }
+    catch (e) { console.warn(e); box.innerHTML = header() + `<div class="empty">A gravação foi feita, mas não consegui separar a voz neste aparelho. Avise a Janaine.</div>`; return; }
+    if (closed) return;
+    recDur = voiceBuf.duration;
+    showEdit();
+  }
+
+  /* ---------- 3. mixar e sincronizar ---------- */
+  let preview = null; // { srcV, srcP, startCtx, startPos }
+  function stopPreview() {
+    if (!preview) return;
+    try { preview.srcV.stop(); } catch (e) {} try { preview.srcP.stop(); } catch (e) {}
+    if (preview.cam) preview.cam.pause(); clearTimeout(preview.camPlay);
+    cancelAnimationFrame(preview.raf); preview = null;
+  }
+  const offset = () => offsetAuto + fix;
+
+  function showEdit() {
+    const envV = envelope(voiceBuf), envP = envelope(pbBuf);
+    let zoom = false, winStart = 0, playPos = 0; // posição na linha do tempo da gravação
+    box.innerHTML = header("Ajuste o volume e a sincronia. Depois toque em Salvar vídeo.") + `
+      <div class="st-cam"><video class="cam" id="stPrev" playsinline muted preload="auto" src="${recUrl}" style="transform:none"></video></div>
+      <div class="hrow" style="justify-content:center"><button class="btn primary" id="stPlay" style="min-width:140px">Ouvir</button><span class="small muted" id="stTime">0:00 / ${fmtT(recDur)}</span></div>
+      <div class="card">
+        <b>Volume</b>
+        <div class="mixrow"><label for="stVv">Sua voz</label><input type="range" id="stVv" min="0" max="2" step="0.01" value="${vol.v}"><output id="stVvO"></output></div>
+        <div class="mixrow"><label for="stVp">Playback</label><input type="range" id="stVp" min="0" max="2" step="0.01" value="${vol.p}"><output id="stVpO"></output></div>
+      </div>
+      <div class="card">
+        <div class="hrow spread"><b>Sincronia</b><span class="small">Voz <span class="syncval" id="stSync"></span></span></div>
+        <p class="small muted" style="margin:0">Arraste a faixa da sua voz para a esquerda ou para a direita até encaixar no playback. Use a lupa para ajustar no detalhe.</p>
+        <div class="tabs"><button id="stZ0" aria-selected="true">Música toda</button><button id="stZ1" aria-selected="false">Lupa (4 segundos)</button></div>
+        <div class="lanes" id="stLanes">
+          <div class="lane"><span>Playback</span><canvas id="stCP"></canvas></div>
+          <div class="lane drag"><span>Sua voz (arraste)</span><canvas id="stCV"></canvas></div>
+        </div>
+        <input type="range" id="stWin" min="0" max="${Math.max(0, recDur - 4).toFixed(2)}" step="0.05" value="${winStart}" aria-label="Posição da lupa" style="accent-color:var(--bronze)" hidden>
+        <div class="nudges">
+          <button class="btn sm" data-n="-0.05">⟨⟨ 50 ms</button><button class="btn sm" data-n="-0.01">⟨ 10 ms</button>
+          <button class="btn sm" data-n="0.01">10 ms ⟩</button><button class="btn sm" data-n="0.05">50 ms ⟩⟩</button>
+        </div>
+        <div class="hrow" style="justify-content:center"><button class="link" id="stReset">Voltar ao ajuste automático</button></div>
+      </div>
+      <button class="btn primary st-big" id="stSave">Salvar vídeo</button>
+      <button class="btn" id="stAgain">Gravar de novo</button>`;
+
+    const cam = box.querySelector("#stPrev");
+    const cP = box.querySelector("#stCP"), cV = box.querySelector("#stCV");
+    const win = box.querySelector("#stWin");
+    const vv = box.querySelector("#stVv"), vp = box.querySelector("#stVp");
+    const pct = x => Math.round(x * 100) + "%";
+    const showVol = () => { box.querySelector("#stVvO").textContent = pct(vol.v); box.querySelector("#stVpO").textContent = pct(vol.p); lsSet(LS_VOL, JSON.stringify(vol)); if (preview) { preview.gV.gain.value = vol.v; preview.gP.gain.value = vol.p; } };
+    vv.oninput = () => { vol.v = +vv.value; showVol(); }; vp.oninput = () => { vol.p = +vp.value; showVol(); }; showVol();
+
+    // desenho: eixo = tempo da gravação (câmera e voz ficam paradas; o playback é desenhado em offset)
+    // Para a pessoa, quem se mexe é a VOZ: desenhamos o playback fixo e a voz deslocada por -offset.
+    const t0 = () => zoom ? winStart : Math.min(0, -offset());
+    const span = () => zoom ? 4 : Math.max(pbBuf.duration, recDur - offset()) - t0() + 0.3;
+    function drawLane(cv, env, startAt, color, playT) {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2); const w = cv.clientWidth * dpr, h = cv.clientHeight * dpr;
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+      const g = cv.getContext("2d"); g.clearRect(0, 0, w, h);
+      const a = t0(), sp = span(); g.fillStyle = color;
+      for (let x = 0; x < w; x++) {
+        const ta = a + (x / w) * sp - startAt, tb = a + ((x + 1) / w) * sp - startAt;
+        const ia = Math.floor(ta * RATE), ib = Math.max(ia + 1, Math.floor(tb * RATE));
+        if (ib <= 0 || ia >= env.length) continue;
+        let m = 0; for (let i = Math.max(0, ia); i < Math.min(env.length, ib); i++) if (env[i] > m) m = env[i];
+        const bh = Math.max(1, m * (h - 14 * dpr)); g.fillRect(x, (h + 10 * dpr - bh) / 2, 1, bh);
+      }
+      if (playT != null) { const px = ((playT - a) / sp) * w; if (px >= 0 && px <= w) { g.fillStyle = "#efe6d2"; g.fillRect(px, 0, 2 * dpr, h); } }
+    }
+    // linha do tempo "do playback": playback começa em 0, a voz começa em -offset
+    function draw(playT) {
+      drawLane(cP, envP, 0, "#c49a6c", playT);
+      drawLane(cV, envV, -offset(), "#8a1a17", playT);
+      box.querySelector("#stSync").textContent = ms(-fix);
+    }
+    const setFix = f => { fix = Math.max(-2, Math.min(2, f)); lsSet(LS_FIX, String(fix)); draw(); if (preview) startPreview(currentPos()); };
+    box.querySelectorAll("[data-n]").forEach(b => b.onclick = () => setFix(fix - +b.dataset.n)); // voz para a direita = playback entra antes
+    box.querySelector("#stReset").onclick = () => setFix(0);
+    const setZoom = z => { zoom = z; box.querySelector("#stZ0").setAttribute("aria-selected", !z); box.querySelector("#stZ1").setAttribute("aria-selected", z); win.hidden = !z; if (z) { winStart = Math.max(0, Math.min(+win.max, (preview ? currentPos() - offset() : 0) - 0.5)); win.value = winStart; } draw(); };
+    box.querySelector("#stZ0").onclick = () => setZoom(false); box.querySelector("#stZ1").onclick = () => setZoom(true);
+    win.max = Math.max(0, pbBuf.duration - 4).toFixed(2);
+    win.oninput = () => { winStart = +win.value; draw(); };
+
+    // arrastar a faixa da voz
+    const lanes = box.querySelector("#stLanes"); let drag = null;
+    cV.parentElement.addEventListener("pointerdown", e => { drag = { x: e.clientX, f: fix, w: cV.clientWidth }; cV.parentElement.setPointerCapture(e.pointerId); });
+    cV.parentElement.addEventListener("pointermove", e => { if (!drag) return; const dt = ((e.clientX - drag.x) / drag.w) * span(); fix = Math.max(-2, Math.min(2, drag.f - dt)); draw(); });
+    const endDrag = () => { if (!drag) return; drag = null; setFix(fix); };
+    cV.parentElement.addEventListener("pointerup", endDrag); cV.parentElement.addEventListener("pointercancel", endDrag);
+    // tocar num ponto da faixa do playback = ouvir dali
+    cP.parentElement.addEventListener("click", e => { const r = cP.getBoundingClientRect(); const tPb = t0() + ((e.clientX - r.left) / r.width) * span(); startPreview(Math.max(0, tPb + offset())); });
+
+    // ouvir
+    function currentPos() { return preview ? preview.startPos + (audioCtx().currentTime - preview.startCtx) : playPos; }
+    function startPreview(pos) {
+      stopPreview(); const c = audioCtx(); pos = Math.max(0, Math.min(pos, recDur - 0.05)); playPos = pos;
+      const gV = c.createGain(), gP = c.createGain(); gV.gain.value = vol.v; gP.gain.value = vol.p;
+      gV.connect(c.destination); gP.connect(c.destination);
+      const srcV = c.createBufferSource(); srcV.buffer = voiceBuf; srcV.connect(gV);
+      const srcP = c.createBufferSource(); srcP.buffer = pbBuf; srcP.connect(gP);
+      const when = c.currentTime + 0.08;
+      srcV.start(when, pos);
+      const pIn = pos - offset(); // posição dentro do playback
+      if (pIn >= 0) { if (pIn < pbBuf.duration) srcP.start(when, pIn); } else srcP.start(when - pIn, 0);
+      cam.currentTime = pos; const camPlay = setTimeout(() => cam.play().catch(() => {}), 80);
+      preview = { srcV, srcP, gV, gP, startCtx: when, startPos: pos, cam, raf: 0, camPlay };
+      box.querySelector("#stPlay").textContent = "Parar";
+      const loop = () => {
+        if (!preview) return; const p = currentPos();
+        if (p >= recDur) { stopPreview(); playPos = 0; box.querySelector("#stPlay").textContent = "Ouvir"; draw(); return; }
+        if (Math.abs(cam.currentTime - p) > 0.15) cam.currentTime = p;
+        if (zoom && (p - offset() > winStart + 3.8)) { winStart = Math.min(+win.max, p - offset() - 0.2); win.value = winStart; }
+        box.querySelector("#stTime").textContent = fmtT(p) + " / " + fmtT(recDur);
+        draw(p - offset()); preview.raf = requestAnimationFrame(loop);
+      };
+      loop();
+    }
+    box.querySelector("#stPlay").onclick = () => { if (preview) { playPos = currentPos(); stopPreview(); box.querySelector("#stPlay").textContent = "Ouvir"; draw(); } else startPreview(playPos >= recDur - 0.1 ? 0 : playPos); };
+    box.querySelector("#stAgain").onclick = () => { if (!confirm("Descartar esta gravação e gravar de novo?")) return; stopPreview(); URL.revokeObjectURL(recUrl); recBlob = null; voiceBuf = null; showSetup(); };
+    box.querySelector("#stSave").onclick = () => { stopPreview(); render(); };
+    requestAnimationFrame(() => draw());
+    window.addEventListener("resize", () => { if (box.querySelector("#stCV")) draw(); });
+  }
+
+  /* ---------- 4. juntar tudo num vídeo ---------- */
+  async function render() {
+    box.innerHTML = header() + `
+      <div class="card stack">
+        <b>Montando o seu vídeo</b>
+        <p class="small muted" style="margin:0">O celular toca a música inteira por dentro para juntar a imagem, a sua voz e o playback. Leva o tempo da música. Não saia do app e não bloqueie a tela.</p>
+        <div class="bar"><i id="stBar"></i></div><p class="small muted" id="stPct" style="margin:0">0%</p>
+        <button class="btn" id="stCancel">Cancelar</button>
+      </div>`;
+    keepAwake();
+    const c = audioCtx();
+    const cam = el("video"); cam.muted = true; cam.playsInline = true; cam.setAttribute("playsinline", ""); cam.preload = "auto"; cam.src = recUrl;
+    cam.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none"; document.body.appendChild(cam);
+    await new Promise(r => { if (cam.readyState >= 1) r(); else cam.onloadedmetadata = r; });
+    let W = cam.videoWidth || 1280, H = cam.videoHeight || 720; const k = Math.min(1, 1280 / Math.max(W, H)); W = Math.round(W * k / 2) * 2; H = Math.round(H * k / 2) * 2;
+    const cv = el("canvas"); cv.width = W; cv.height = H; const g = cv.getContext("2d");
+    // o iPhone só "grava" um canvas que está na tela: fica pequenininho e invisível
+    cv.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none"; document.body.appendChild(cv);
+    const dest = c.createMediaStreamDestination();
+    const gV = c.createGain(), gP = c.createGain(); gV.gain.value = vol.v; gP.gain.value = vol.p; gV.connect(dest); gP.connect(dest);
+    const srcV = c.createBufferSource(); srcV.buffer = voiceBuf; srcV.connect(gV);
+    const srcP = c.createBufferSource(); srcP.buffer = pbBuf; srcP.connect(gP);
+    const stream = new MediaStream([...cv.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    const mime = pickMime(); const out = [];
+    let rec;
+    try { rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 5_000_000, audioBitsPerSecond: 192_000 } : undefined); }
+    catch (e) { cv.remove(); cam.remove(); toast("Este aparelho não conseguiu montar o vídeo."); showEdit(); return; }
+    rec.ondataavailable = e => { if (e.data && e.data.size) out.push(e.data); };
+    let cancelled = false, raf = 0;
+    const done = new Promise(r => { rec.onstop = r; });
+    box.querySelector("#stCancel").onclick = () => { cancelled = true; try { rec.stop(); } catch (e) {} };
+
+    g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+    rec.start(1000);
+    await new Promise(r => setTimeout(r, 150));
+    const when = c.currentTime + 0.1;
+    srcV.start(when, 0);
+    const off = offset(); if (off >= 0) srcP.start(when + off, 0); else srcP.start(when, -off);
+    setTimeout(() => cam.play().catch(() => {}), 100);
+    const bar = box.querySelector("#stBar"), pctEl = box.querySelector("#stPct");
+    const frame = () => {
+      const p = c.currentTime - when;
+      if (p >= 0 && cam.readyState >= 2) { if (Math.abs(cam.currentTime - p) > 0.12) cam.currentTime = p; g.drawImage(cam, 0, 0, W, H); }
+      const f = Math.max(0, Math.min(1, p / recDur)); bar.style.width = f * 100 + "%"; pctEl.textContent = Math.round(f * 100) + "%";
+      if (p >= recDur || cancelled) { try { rec.stop(); } catch (e) {} return; }
+      raf = requestAnimationFrame(frame);
+    };
+    frame();
+    await done; cancelAnimationFrame(raf);
+    try { srcV.stop(); } catch (e) {} try { srcP.stop(); } catch (e) {} cam.pause(); cam.remove(); cv.remove();
+    try { if (wake) wake.release(); } catch (e) {}
+    if (cancelled || closed) { if (!closed) showEdit(); return; }
+    const type = rec.mimeType || out[0]?.type || "video/mp4";
+    const final = new Blob(out, { type });
+    showResult(final);
+  }
+
+  function showResult(blob) {
+    const ext = /mp4/.test(blob.type) ? "mp4" : "webm";
+    const name = (song.name + " - " + keyName).replace(/[\\/:*?"<>|]+/g, "") + "." + ext;
+    const url = URL.createObjectURL(blob);
+    const file = new File([blob], name, { type: blob.type });
+    const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+    box.innerHTML = header("Pronto! Confira e salve.") + `
+      <div class="st-result"><video controls playsinline src="${url}"></video></div>
+      ${canShare ? `<button class="btn primary st-big" id="stShare">Salvar ou compartilhar</button>` : ""}
+      <a class="btn ${canShare ? "" : "primary st-big"}" style="text-align:center;text-decoration:none" href="${url}" download="${name}">Baixar o arquivo</a>
+      <p class="small muted" style="margin:0">${canShare ? "No iPhone, escolha Salvar vídeo para ele ir para a galeria." : ""} Tamanho: ${(blob.size / 1048576).toFixed(1).replace(".", ",")} MB.</p>
+      <button class="btn" id="stBack">Voltar e ajustar a mixagem</button>`;
+    const sh = box.querySelector("#stShare");
+    if (sh) sh.onclick = () => navigator.share({ files: [file], title: song.name }).catch(() => {});
+    box.querySelector("#stBack").onclick = () => { URL.revokeObjectURL(url); showEdit(); };
+  }
+}
