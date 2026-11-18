@@ -431,11 +431,12 @@ function viewSong() {
       ${S.addTo ? `<div class="list">${S.playlists.map(p => { const has = (p.items || []).includes(s.id); return `<button class="row" data-a="addpl" data-pl="${p.id}" ${has ? "disabled" : ""}><span class="name">${esc(p.name)}</span><span class="pill ${has ? "ok" : ""}">${has ? "Já está" : (p.items || []).length + " músicas"}</span></button>`; }).join("")}
         <form class="hrow" id="newPlFromSong"><input class="field" style="flex:1" id="newPlName" placeholder="Nome da nova playlist" aria-label="Nome da nova playlist"><button class="btn sm" type="submit">Criar e adicionar</button></form></div>` : ""}
     </div>
-    ${canTest() ? `<div class="card" style="border-color:var(--bronze)">
-      <div class="hrow spread"><b>Gravar meu vídeo</b><span class="pill brass">${S.isAdmin ? "teste, só você e as testadoras veem" : "em teste"}</span></div>
-      <p class="small muted" style="margin:0">Grave você cantando com o playback do tom ${esc(k)} no fone. Depois ajuste o volume da voz e do playback, acerte a sincronia e salve o vídeo.</p>
+    <div class="card" style="border-color:var(--bronze)">
+      <div class="hrow spread"><b>Gravar meu vídeo</b><span class="pill brass">Beta</span></div>
+      <p class="small muted" style="margin:0">Grave você cantando com o playback do tom ${esc(k)} no fone. Depois ajuste o volume da voz e do playback, acerte a sincronia, corte e salve o vídeo.</p>
+      <p class="small muted" style="margin:0">Função nova, ainda em teste. Conte o que achou e o que pode melhorar ${S.sup.ready && !S.isAdmin ? `em Conta, no <button class="link" data-a="nav" data-v="support">Fale com a Janaine</button>` : `pelo <a href="https://wa.me/5541998771712?text=${encodeURIComponent("Olá, Janaine! Testei o Gravar meu vídeo no app e queria contar:")}" target="_blank" rel="noopener">WhatsApp de Janaine Pavani</a>`}.</p>
       <button class="btn primary" data-a="record" ${available(s.id) ? "" : "disabled"}>Gravar</button>
-    </div>` : ""}
+    </div>
     <div class="card">
       <div class="hrow spread"><b>Usar sem internet</b>
         ${canOffline() ? (off ? `<button class="btn sm" data-a="unsave" data-id="${s.id}">Remover do aparelho</button>` : `<button class="btn sm primary" data-a="save" data-id="${s.id}" ${busy !== undefined || !navigator.onLine ? "disabled" : ""}>${busy !== undefined ? "Salvando " + Math.round(busy * 100) + "%" : "Salvar no aparelho"}</button>`) : ""}</div>
