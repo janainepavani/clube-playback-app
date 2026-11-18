@@ -151,7 +151,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   function showSetup() {
     box.innerHTML = header() + `
       <details class="card" style="gap:8px" ${lsGet("cp-rec-tut") ? "" : "open"} id="stTut">
-        <summary style="cursor:pointer"><b>Como gravar o seu vídeo</b> <span class="small muted">(toque para ${lsGet("cp-rec-tut") ? "abrir" : "fechar"})</span></summary>
+        <summary style="cursor:pointer"><b>Dicas para gravar o seu vídeo</b> <span class="small muted">(toque para ${lsGet("cp-rec-tut") ? "abrir" : "fechar"})</span></summary>
         <ol class="small" style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
           <li><b>Tom:</b> o vídeo usa o tom escolhido na tela da música. Se quiser outro, troque antes de entrar aqui.</li>
           <li><b>Lugar:</b> escolha um canto silencioso, com a luz de frente para você (janela à sua frente, não atrás).</li>
