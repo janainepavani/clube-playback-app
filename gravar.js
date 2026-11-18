@@ -18,9 +18,19 @@ const escH = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<":
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 
 function audioCtx() {
-  if (!ctx || ctx.state === "closed") ctx = new (window.AudioContext || window.webkitAudioContext)();
-  if (ctx.state === "suspended") ctx.resume();
+  if (!ctx || ctx.state === "closed") {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    try { ctx = new AC({ sampleRate: 48000 }); } catch (e) { ctx = new AC(); }
+  }
+  if (ctx.state !== "running") ctx.resume().catch(() => {});
   return ctx;
+}
+// Depois que o microfone desliga, o iPhone continua no modo "ligação" (som abafado e saindo pelo alto-falante de cima).
+// Para ouvir e montar o vídeo com qualidade de música, volta para o modo de reprodução e cria um áudio novo, em 48 kHz.
+async function freshAudio() {
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+  try { if (ctx) await ctx.close(); } catch (e) {}
+  ctx = null; return audioCtx();
 }
 function pickMime() {
   const opts = ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4", "video/webm;codecs=vp8,opus", "video/webm"];
@@ -70,6 +80,16 @@ const CSS = `
 .nudges{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
 .nudges .btn{min-width:64px}
 .syncval{font-variant-numeric:tabular-nums;font-weight:700;color:var(--bronze)}
+.tl{position:relative;height:60px;margin:10px 18px 6px;border-radius:6px;background:#1d1a18;touch-action:none;user-select:none;-webkit-user-select:none}
+.tl canvas{position:absolute;inset:0;width:100%;height:100%;display:block;border-radius:6px}
+.tl-dim{position:absolute;top:0;bottom:0;background:#000000c0;pointer-events:none}
+.tl-sel{position:absolute;top:-4px;bottom:-4px;border-top:4px solid var(--bronze);border-bottom:4px solid var(--bronze);pointer-events:none}
+.tl-h{position:absolute;top:-4px;bottom:-4px;width:18px;background:var(--bronze);pointer-events:auto;touch-action:none;cursor:ew-resize}
+.tl-h.a{left:-18px;border-radius:9px 0 0 9px}.tl-h.b{right:-18px;border-radius:0 9px 9px 0}
+.tl-h::after{content:"";position:absolute;left:7px;top:32%;bottom:32%;width:4px;border-radius:2px;background:#1a120a}
+.tl-head{position:absolute;top:-10px;bottom:-10px;width:3px;margin-left:-1.5px;background:#fff;border-radius:2px;pointer-events:none;box-shadow:0 0 6px #000}
+.tl-info{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.tl-info b{color:var(--cream)}
 .transport{display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap}
 .transport .btn{min-width:56px}
 .transport .play{min-width:110px}
@@ -247,7 +267,11 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     stopCam();
     recBlob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "video/mp4" }); chunks = [];
     recUrl = URL.createObjectURL(recBlob);
-    try { voiceBuf = await audioCtx().decodeAudioData(await recBlob.arrayBuffer()); }
+    try {
+      const c = await freshAudio();
+      pbBuf = await c.decodeAudioData(await videoBlob.arrayBuffer());
+      voiceBuf = await c.decodeAudioData(await recBlob.arrayBuffer());
+    }
     catch (e) { console.warn(e); box.innerHTML = header() + `<div class="empty">A gravação foi feita, mas não consegui separar a voz neste aparelho. Avise a Janaine.</div>`; return; }
     if (closed) return;
     recDur = voiceBuf.duration; trimA = 0; trimB = recDur;
@@ -262,6 +286,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     if (preview.cam) preview.cam.pause(); clearTimeout(preview.camPlay);
     cancelAnimationFrame(preview.raf); preview = null;
     const pb = box.querySelector("#stPlay"); if (pb) pb.textContent = "Play";
+    const ov = box.querySelector("#stFadeOv"); if (ov) ov.style.opacity = 0;
   }
   const offset = () => offsetAuto + fix;
 
@@ -269,15 +294,25 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     const envV = envelope(voiceBuf), envP = envelope(pbBuf);
     let zoom = false, winStart = 0, playPos = 0; // posição na linha do tempo da gravação
     box.innerHTML = header("Ajuste o volume e a sincronia. Depois toque em Salvar vídeo.") + `
-      <div class="st-cam"><video class="cam" id="stPrev" playsinline muted preload="auto" src="${recUrl}" style="transform:none"></video></div>
+      <div class="st-cam"><video class="cam" id="stPrev" playsinline muted preload="auto" src="${recUrl}" style="transform:none"></video><div id="stFadeOv" style="position:absolute;inset:0;background:#000;opacity:0;pointer-events:none"></div></div>
       <div class="card" style="gap:8px">
         <div class="tbig"><span id="stTime">0:00,0</span> <span class="small muted" style="font-weight:500">/ ${fmtT1(recDur)}</span></div>
-        <input type="range" class="scrub" id="stScrub" min="0" max="${recDur.toFixed(2)}" step="0.01" value="0" aria-label="Posição no vídeo">
+        <div class="tl" id="stTL" aria-label="Linha do tempo: arraste as alças douradas para cortar">
+          <canvas id="stThumbs"></canvas>
+          <div class="tl-dim" id="stDimA"></div><div class="tl-dim" id="stDimB"></div>
+          <div class="tl-sel" id="stSel"><div class="tl-h a" data-h="a"></div><div class="tl-h b" data-h="b"></div></div>
+          <div class="tl-head" id="stHead"></div>
+        </div>
+        <div class="tl-info"><span>Início <b id="stAO"></b></span><span>Duração <b id="stLen"></b></span><span>Fim <b id="stBO"></b></span></div>
+        <p class="small muted" style="margin:0;text-align:center">Arraste as alças douradas para cortar o começo e o fim. Toque ou arraste na faixa para andar pelo vídeo.</p>
         <div class="transport">
           <button class="btn sm" data-sk="-5">−5 s</button><button class="btn sm" data-sk="-1">−1 s</button>
           <button class="btn primary play" id="stPlay">Play</button>
           <button class="btn sm" data-sk="1">+1 s</button><button class="btn sm" data-sk="5">+5 s</button>
         </div>
+        <div class="nudges"><button class="btn sm ghost" id="stMarkA">Cortar início aqui</button><button class="btn sm ghost" id="stMarkB">Cortar fim aqui</button><button class="btn sm ghost" id="stTrimReset">Desfazer corte</button></div>
+        <button class="btn primary" id="stFinal" style="padding:13px">Assistir à prévia do vídeo final</button>
+        <p class="small muted" style="margin:0;text-align:center">A prévia já sai com o corte, o volume, a sincronia e os fades, do jeito que vai ficar.</p>
       </div>
       <div class="card">
         <b>Volume</b>
@@ -285,15 +320,10 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
         <div class="mixrow"><label for="stVp">Playback</label><input type="range" id="stVp" min="0" max="2" step="0.01" value="${vol.p}"><output id="stVpO"></output></div>
       </div>
       <div class="card">
-        <div class="hrow spread"><b>Cortar</b><span class="small muted">Duração final <span class="syncval" id="stLen"></span></span></div>
-        <p class="small muted" style="margin:0">Encurte o começo ou o fim, ou deixe só um trecho. Toque em Play, pause no ponto certo e marque com os botões. Também dá para usar a barra de tempo e os botões de voltar e avançar lá em cima.</p>
-        <div class="mixrow"><label for="stTa">Começa em</label><input type="range" id="stTa" min="0" max="${recDur.toFixed(2)}" step="0.05" value="${trimA}"><output id="stTaO"></output></div>
-        <div class="mixrow"><label for="stTb">Termina em</label><input type="range" id="stTb" min="0" max="${recDur.toFixed(2)}" step="0.05" value="${trimB}"><output id="stTbO"></output></div>
-        <div class="nudges"><button class="btn sm" id="stMarkA">Marcar começo aqui</button><button class="btn sm" id="stMarkB">Marcar fim aqui</button></div>
+        <b>Fade</b>
         <div class="mixrow"><label for="stFi">Fade de entrada</label><select class="field" id="stFi" style="padding:6px 10px">${[0, 0.5, 1, 2, 3].map(x => `<option value="${x}" ${x === fade.i ? "selected" : ""}>${x ? String(x).replace(".", ",") + " s" : "Sem fade"}</option>`).join("")}</select><span></span></div>
         <div class="mixrow"><label for="stFo">Fade de saída</label><select class="field" id="stFo" style="padding:6px 10px">${[0, 0.5, 1, 2, 3, 5].map(x => `<option value="${x}" ${x === fade.o ? "selected" : ""}>${x ? String(x).replace(".", ",") + " s" : "Sem fade"}</option>`).join("")}</select><span></span></div>
         <p class="small muted" style="margin:0">O fade abaixa o som e escurece a imagem aos poucos, no começo e no fim do vídeo final.</p>
-        <div class="nudges"><button class="btn sm ghost" id="stTrimPlay">Ouvir o trecho</button><button class="btn sm ghost" id="stTrimEnd">Ouvir os últimos 3 segundos</button><button class="btn sm ghost" id="stTrimReset">Sem corte</button></div>
       </div>
       <div class="card">
         <div class="hrow spread"><b>Sincronia</b><span class="small">Voz <span class="syncval" id="stSync"></span></span></div>
@@ -320,14 +350,56 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     const pct = x => Math.round(x * 100) + "%";
     const showVol = () => { box.querySelector("#stVvO").textContent = pct(vol.v); box.querySelector("#stVpO").textContent = pct(vol.p); lsSet(LS_VOL, JSON.stringify(vol)); if (preview) { preview.gV.gain.value = vol.v; preview.gP.gain.value = vol.p; } };
     vv.oninput = () => { vol.v = +vv.value; showVol(); }; vp.oninput = () => { vol.p = +vp.value; showVol(); }; showVol();
-    const ta = box.querySelector("#stTa"), tb = box.querySelector("#stTb");
-    const showTrim = () => { ta.value = trimA; tb.value = trimB; box.querySelector("#stTaO").textContent = fmtT1(trimA); box.querySelector("#stTbO").textContent = fmtT1(trimB); box.querySelector("#stLen").textContent = fmtT(trimB - trimA); if (box.querySelector("#stCV")) draw(); };
+    // linha do tempo no estilo dos editores: alças douradas no começo e no fim, cabeça de leitura branca
+    const tl = box.querySelector("#stTL"), pctOf = t => (t / recDur) * 100 + "%";
+    const showHead = p => { box.querySelector("#stHead").style.left = pctOf(Math.max(0, Math.min(recDur, p))); };
+    const showTrim = () => {
+      box.querySelector("#stDimA").style.cssText = "left:0;width:" + pctOf(trimA);
+      box.querySelector("#stDimB").style.cssText = "left:" + pctOf(trimB) + ";right:0";
+      const sel = box.querySelector("#stSel"); sel.style.left = pctOf(trimA); sel.style.width = pctOf(trimB - trimA);
+      box.querySelector("#stAO").textContent = fmtT1(trimA); box.querySelector("#stBO").textContent = fmtT1(trimB); box.querySelector("#stLen").textContent = fmtT1(trimB - trimA);
+      if (box.querySelector("#stCV")) draw();
+    };
     const setTrim = (a, b) => { trimA = Math.max(0, Math.min(a, recDur - 1)); trimB = Math.min(recDur, Math.max(b, trimA + 1)); if (trimA > b - 1) trimA = Math.max(0, trimB - 1); showTrim(); };
-    ta.oninput = () => setTrim(+ta.value, trimB); tb.oninput = () => setTrim(trimA, +tb.value);
-    box.querySelector("#stMarkA").onclick = () => { const p = preview ? currentPos() : playPos; setTrim(p, trimB); toast("Começo marcado em " + fmtT1(trimA) + "."); };
-    box.querySelector("#stMarkB").onclick = () => { const p = preview ? currentPos() : playPos; setTrim(trimA, p); toast("Fim marcado em " + fmtT1(trimB) + "."); };
-    box.querySelector("#stTrimPlay").onclick = () => startPreview(trimA);
-    box.querySelector("#stTrimEnd").onclick = () => startPreview(Math.max(trimA, trimB - 3));
+    const tAt = x => { const r = tl.getBoundingClientRect(); return Math.max(0, Math.min(recDur, ((x - r.left) / r.width) * recDur)); };
+    let tlDrag = null;
+    tl.addEventListener("pointerdown", e => {
+      e.preventDefault(); tl.setPointerCapture(e.pointerId);
+      const h = e.target.closest("[data-h]"); const was = !!preview; if (was) { playPos = currentPos(); stopPreview(); }
+      tlDrag = { h: h ? h.dataset.h : null, was };
+      if (!h) seekTo(tAt(e.clientX));
+    });
+    tl.addEventListener("pointermove", e => {
+      if (!tlDrag) return; const t = tAt(e.clientX);
+      if (tlDrag.h === "a") { setTrim(t, trimB); seekTo(trimA); }
+      else if (tlDrag.h === "b") { setTrim(trimA, t); seekTo(trimB - 0.05); }
+      else seekTo(t);
+    });
+    const tlEnd = () => { if (!tlDrag) return; const d = tlDrag; tlDrag = null; if (d.h === "a") seekTo(trimA); if (d.was && !d.h) startPreview(playPos); };
+    tl.addEventListener("pointerup", tlEnd); tl.addEventListener("pointercancel", tlEnd);
+    box.querySelector("#stMarkA").onclick = () => { const p = preview ? currentPos() : playPos; setTrim(p, trimB); toast("Início cortado em " + fmtT1(trimA) + "."); };
+    box.querySelector("#stMarkB").onclick = () => { const p = preview ? currentPos() : playPos; setTrim(trimA, p); toast("Fim cortado em " + fmtT1(trimB) + "."); };
+    box.querySelector("#stFinal").onclick = () => startPreview(trimA);
+    // miniaturas do vídeo na faixa
+    (async () => {
+      const cvT = box.querySelector("#stThumbs"); const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cvT.width = cvT.clientWidth * dpr; cvT.height = cvT.clientHeight * dpr; const g = cvT.getContext("2d");
+      const v = el("video"); v.muted = true; v.playsInline = true; v.setAttribute("playsinline", ""); v.preload = "auto"; v.src = recUrl;
+      v.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none"; document.body.appendChild(v);
+      try {
+        await new Promise((r, j) => { v.onloadeddata = r; v.onerror = j; setTimeout(r, 4000); });
+        const n = Math.max(4, Math.round(cvT.width / (cvT.height * 0.75))), tw = cvT.width / n;
+        for (let i = 0; i < n; i++) {
+          if (!box.contains(cvT)) break;
+          v.currentTime = Math.min(recDur - 0.1, (i + 0.5) * recDur / n);
+          await new Promise(r => { v.onseeked = r; setTimeout(r, 1500); });
+          const vw = v.videoWidth || 16, vh = v.videoHeight || 9, sc = Math.max(tw / vw, cvT.height / vh);
+          g.save(); g.beginPath(); g.rect(i * tw, 0, tw, cvT.height); g.clip();
+          g.drawImage(v, i * tw + (tw - vw * sc) / 2, (cvT.height - vh * sc) / 2, vw * sc, vh * sc); g.restore();
+        }
+      } catch (e) {}
+      v.remove();
+    })();
     const saveFade = () => lsSet("cp-rec-fade", JSON.stringify(fade));
     box.querySelector("#stFi").onchange = e => { fade.i = +e.target.value; saveFade(); };
     box.querySelector("#stFo").onchange = e => { fade.o = +e.target.value; saveFade(); };
@@ -406,29 +478,27 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
         if (p >= trimB) { stopPreview(); box.querySelector("#stPlay").textContent = "Play"; seekTo(trimA); return; }
         if (Math.abs(cam.currentTime - p) > 0.15) cam.currentTime = p;
         if (zoom && (p - offset() > winStart + 3.8)) { winStart = Math.min(+win.max, p - offset() - 0.2); win.value = winStart; }
-        box.querySelector("#stTime").textContent = fmtT1(p); if (!scrubbing) box.querySelector("#stScrub").value = p;
+        box.querySelector("#stTime").textContent = fmtT1(p); showHead(p);
+        const ov = box.querySelector("#stFadeOv"); if (ov) ov.style.opacity = 1 - lvl(p - trimA);
         draw(p - offset()); preview.raf = requestAnimationFrame(loop);
       };
       loop();
     }
     // ir para um ponto: tocando, continua dali; pausado, mostra a imagem daquele ponto
-    let scrubbing = false;
     function seekTo(pos) {
       pos = Math.max(0, Math.min(recDur - 0.05, pos));
       if (preview) { startPreview(pos); return; }
       playPos = pos; cam.currentTime = pos;
-      box.querySelector("#stTime").textContent = fmtT1(pos); box.querySelector("#stScrub").value = pos;
+      box.querySelector("#stTime").textContent = fmtT1(pos); showHead(pos);
+      const ov = box.querySelector("#stFadeOv"); if (ov) ov.style.opacity = 0;
       if (zoom) { const pb = pos - offset(); if (pb < winStart || pb > winStart + 4) { winStart = Math.max(0, Math.min(+win.max, pb - 1)); win.value = winStart; } }
       draw();
     }
-    const scrub = box.querySelector("#stScrub");
-    scrub.addEventListener("input", () => { scrubbing = true; const was = !!preview; if (was) stopPreview(); seekTo(+scrub.value); scrub.dataset.was = was ? "1" : scrub.dataset.was || ""; });
-    scrub.addEventListener("change", () => { scrubbing = false; if (scrub.dataset.was === "1") { scrub.dataset.was = ""; startPreview(+scrub.value); } });
     box.querySelectorAll("[data-sk]").forEach(b => b.onclick = () => seekTo((preview ? currentPos() : playPos) + +b.dataset.sk));
-    box.querySelector("#stPlay").onclick = () => { if (preview) { playPos = currentPos(); stopPreview(); box.querySelector("#stPlay").textContent = "Play"; seekTo(playPos); } else startPreview(playPos >= trimB - 0.1 || playPos < trimA ? trimA : playPos); };
+    box.querySelector("#stPlay").onclick = () => { if (preview) { playPos = currentPos(); stopPreview(); seekTo(playPos); } else startPreview(playPos >= trimB - 0.1 || playPos < trimA ? trimA : playPos); };
     box.querySelector("#stAgain").onclick = () => { if (!confirm("Descartar esta gravação e gravar de novo?")) return; stopPreview(); URL.revokeObjectURL(recUrl); recBlob = null; voiceBuf = null; showSetup(); };
     box.querySelector("#stSave").onclick = () => { stopPreview(); render(); };
-    requestAnimationFrame(() => showTrim());
+    requestAnimationFrame(() => { showTrim(); showHead(playPos); });
     window.addEventListener("resize", () => { if (box.querySelector("#stCV")) draw(); });
   }
 
@@ -443,6 +513,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       </div>`;
     keepAwake();
     const c = audioCtx();
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
     const cam = el("video"); cam.muted = true; cam.playsInline = true; cam.setAttribute("playsinline", ""); cam.preload = "auto"; cam.src = recUrl;
     cam.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none"; document.body.appendChild(cam);
     await new Promise(r => { if (cam.readyState >= 1) r(); else cam.onloadedmetadata = r; });
@@ -450,11 +521,23 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     const cv = el("canvas"); cv.width = W; cv.height = H; const g = cv.getContext("2d");
     // o iPhone só "grava" um canvas que está na tela: fica pequenininho e invisível
     cv.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none"; document.body.appendChild(cv);
-    const dest = c.createMediaStreamDestination();
-    const gM = c.createGain(); gM.connect(dest); // fade de entrada e saída
-    const gV = c.createGain(), gP = c.createGain(); gV.gain.value = vol.v; gP.gain.value = vol.p; gV.connect(gM); gP.connect(gM);
-    const srcV = c.createBufferSource(); srcV.buffer = voiceBuf; srcV.connect(gV);
-    const srcP = c.createBufferSource(); srcP.buffer = pbBuf; srcP.connect(gP);
+    // mixagem feita antes, fora do tempo real, em 48 kHz estéreo: volume, sincronia, corte e fades
+    const len = trimB - trimA, SR = 48000;
+    const fi = Math.min(fade.i, len / 2), fo = Math.min(fade.o, len / 2);
+    let mix;
+    try {
+      const oc = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(2, Math.ceil(len * SR), SR);
+      const gM = oc.createGain(); gM.connect(oc.destination);
+      gM.gain.setValueAtTime(fi ? 0 : 1, 0); if (fi) gM.gain.linearRampToValueAtTime(1, fi);
+      if (fo) { gM.gain.setValueAtTime(1, len - fo); gM.gain.linearRampToValueAtTime(0, len); }
+      const gV = oc.createGain(), gP = oc.createGain(); gV.gain.value = vol.v; gP.gain.value = vol.p; gV.connect(gM); gP.connect(gM);
+      const sV = oc.createBufferSource(); sV.buffer = voiceBuf; sV.connect(gV); sV.start(0, trimA);
+      const sP = oc.createBufferSource(); sP.buffer = pbBuf; sP.connect(gP);
+      const pIn = trimA - offset(); if (pIn >= 0) { if (pIn < pbBuf.duration) sP.start(0, pIn); } else sP.start(-pIn, 0);
+      mix = await oc.startRendering();
+    } catch (e) { console.warn(e); cam.remove(); cv.remove(); toast("Não consegui fazer a mixagem neste aparelho."); showEdit(); return; }
+    const dest = c.createMediaStreamDestination(); dest.channelCount = 2;
+    const srcM = c.createBufferSource(); srcM.buffer = mix; srcM.connect(dest);
     const stream = new MediaStream([...cv.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
     const mime = pickMime(); const out = [];
     let rec;
@@ -470,14 +553,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     rec.start(1000);
     await new Promise(r => setTimeout(r, 150));
     const when = c.currentTime + 0.1;
-    const len = trimB - trimA;
-    const fi = Math.min(fade.i, len / 2), fo = Math.min(fade.o, len / 2);
-    gM.gain.setValueAtTime(fi ? 0 : 1, when);
-    if (fi) gM.gain.linearRampToValueAtTime(1, when + fi);
-    if (fo) { gM.gain.setValueAtTime(1, when + len - fo); gM.gain.linearRampToValueAtTime(0, when + len); }
-    srcV.start(when, trimA);
-    const pIn = trimA - offset(); // onde o playback está no começo do corte
-    if (pIn >= 0) { if (pIn < pbBuf.duration) srcP.start(when, pIn); } else srcP.start(when - pIn, 0);
+    srcM.start(when);
     setTimeout(() => cam.play().catch(() => {}), 100);
     const bar = box.querySelector("#stBar"), pctEl = box.querySelector("#stPct");
     const frame = () => {
@@ -492,7 +568,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     };
     frame();
     await done; cancelAnimationFrame(raf);
-    try { srcV.stop(); } catch (e) {} try { srcP.stop(); } catch (e) {} cam.pause(); cam.remove(); cv.remove();
+    try { srcM.stop(); } catch (e) {} cam.pause(); cam.remove(); cv.remove();
     try { if (wake) wake.release(); } catch (e) {}
     if (cancelled || closed) { if (!closed) showEdit(); return; }
     const type = rec.mimeType || out[0]?.type || "video/mp4";
