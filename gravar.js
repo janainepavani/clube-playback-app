@@ -69,7 +69,8 @@ const CSS = `
 .st-pip{position:absolute;width:38%;max-width:260px;border-radius:10px;overflow:hidden;box-shadow:0 6px 20px #000d;border:2px solid #c49a6c;background:#000;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;z-index:2}
 .st-pip video{pointer-events:none}
 .st-pip video{width:100%;display:block}
-.st-pip.big{width:62%;max-width:420px}
+.st-pip.l1{width:66%;max-width:520px}
+.st-pip.l2{width:100%;max-width:none}
 .st-rec{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:#b3261e;color:#fff;font-weight:700;font-size:14px;padding:4px 12px;border-radius:99px;display:none}
 .st-rec.on{display:block}
 .st-count{position:absolute;inset:0;display:none;place-items:center;font-size:96px;font-weight:700;color:#fff;text-shadow:0 4px 20px #000}
@@ -115,7 +116,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
   let pbBuf = null, voiceBuf = null, recBlob = null, recUrl = null, recDur = 0, trimA = 0, trimB = 0;
   const fade = Object.assign({ i: 1, o: 2 }, (() => { try { return JSON.parse(lsGet("cp-rec-fade") || "{}"); } catch (e) { return {}; } })());
   let pbSrc = null, offsetAuto = 0;
-  let pipVideo = null, pipUrl = URL.createObjectURL(videoBlob), pipPos = null, pipBig = false;
+  let pipVideo = null, pipUrl = URL.createObjectURL(videoBlob), pipPos = null, pipLevel = 0;
   let facing = lsGet("cp-rec-cam") === "environment" ? "environment" : "user";
   const vol = Object.assign({ v: 1, p: 0.8 }, (() => { try { return JSON.parse(lsGet(LS_VOL) || "{}"); } catch (e) { return {}; } })());
   let fix = +(lsGet(LS_FIX) || 0); // correção manual guardada
@@ -189,10 +190,10 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
 
   /* ---------- 2. gravar ---------- */
   function showRecord() {
-    box.innerHTML = header("Arraste o vídeo com letra para onde quiser. Toque duas vezes nele para aumentar ou diminuir.") + `
+    box.innerHTML = header("Arraste o vídeo com letra para onde quiser. Toque duas vezes nele para mudar o tamanho (pequeno, médio, grande).") + `
       <div class="st-cam" id="stCam">
         <video class="cam ${facing === "user" ? "mirror" : ""}" id="stLive" playsinline muted autoplay></video>
-        <div class="st-pip ${pipBig ? "big" : ""}" id="stPip"><video playsinline muted preload="auto" src="${pipUrl}"></video></div>
+        <div class="st-pip ${pipLevel ? "l" + pipLevel : ""}" id="stPip"><video playsinline muted preload="auto" src="${pipUrl}"></video></div>
         <div class="st-rec" id="stRecTag">● Gravando 0:00</div>
         <div class="st-count" id="stCount"></div>
       </div>
@@ -222,7 +223,7 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
     });
     const up = () => {
       if (!drag) return; const moved = drag.moved; drag = null; if (moved) return;
-      const now = Date.now(); if (now - lastTap < 350) { pipBig = !pipBig; pip.classList.toggle("big", pipBig); place(); lastTap = 0; } else lastTap = now;
+      const now = Date.now(); if (now - lastTap < 350) { pip.classList.remove("l" + pipLevel); pipLevel = (pipLevel + 1) % 3; if (pipLevel) pip.classList.add("l" + pipLevel); place(); lastTap = 0; } else lastTap = now;
     };
     pip.addEventListener("pointerup", up); pip.addEventListener("pointercancel", () => { drag = null; });
     window.addEventListener("resize", () => { if (box.contains(pip)) place(); });
