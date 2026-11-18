@@ -150,6 +150,19 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
 
   function showSetup() {
     box.innerHTML = header() + `
+      <details class="card" style="gap:8px" ${lsGet("cp-rec-tut") ? "" : "open"} id="stTut">
+        <summary style="cursor:pointer"><b>Como gravar o seu vídeo</b> <span class="small muted">(toque para ${lsGet("cp-rec-tut") ? "abrir" : "fechar"})</span></summary>
+        <ol class="small" style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
+          <li><b>Tom:</b> o vídeo usa o tom escolhido na tela da música. Se quiser outro, troque antes de entrar aqui.</li>
+          <li><b>Lugar:</b> escolha um canto silencioso, com a luz de frente para você (janela à sua frente, não atrás).</li>
+          <li><b>Celular:</b> apoie num suporte ou tripé, na altura dos olhos. Em pé para Reels e Status, deitado para YouTube.</li>
+          <li><b>Fone:</b> coloque o fone antes de ligar a câmera (veja o quadro abaixo).</li>
+          <li><b>Câmera:</b> toque em Ligar câmera. Arraste o vídeo com letra para onde ficar melhor e toque duas vezes nele para mudar o tamanho. O botão Trocar câmera alterna entre a da frente e a de trás.</li>
+          <li><b>Gravar:</b> toque em Gravar, espere a contagem de 3 e cante. A gravação para sozinha quando a música acaba, ou toque em Parar.</li>
+          <li><b>Ajustar:</b> confira com o Play. Acerte o volume da voz e do playback, corte o começo e o fim pelas alças douradas e escolha o fade.</li>
+          <li><b>Salvar:</b> toque em Assistir à prévia do vídeo final. Se estiver bom, toque em Salvar vídeo e depois em Salvar ou compartilhar. No iPhone, escolha Salvar vídeo para ir para a galeria.</li>
+        </ol>
+      </details>
       <div class="card" style="border-color:var(--bronze);gap:8px">
         <b>Antes de gravar: use fone de ouvido</b>
         <p class="small" style="margin:0"><b>Fone com fio: o melhor resultado.</b> O microfone pega só a sua voz e o playback entra limpo no vídeo, já sincronizado.</p>
@@ -160,6 +173,8 @@ export async function openStudio({ song, keyName, videoBlob, email, toast }) {
       <div class="st-cam" id="stCam"><div class="empty" style="width:100%">Toque em Ligar câmera</div></div>
       <button class="btn primary st-big" id="stOn">Ligar câmera e microfone</button>`;
     box.querySelector("#stOn").onclick = startCam;
+    // depois da primeira vez, o tutorial já aparece fechado
+    lsSet("cp-rec-tut", "1");
   }
 
   async function openCam() {
