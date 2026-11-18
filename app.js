@@ -15,6 +15,9 @@ import {
 import { firebaseConfig } from "./firebase-config.js";
 
 const ADMIN_EMAIL = "janaine@janainepavani.com";
+// Testadoras: veem as funções em teste (ex.: Gravar meu vídeo), sem acesso ao Painel
+const TESTERS = ["licassia.cipriano@gmail.com"];
+const canTest = () => S.isAdmin || TESTERS.includes((S.user && S.user.email || "").toLowerCase());
 const CLUB_URL = "https://www.janainepavani.com/clubeplayback";
 const WHATS = "5541998771712?text=" + encodeURIComponent("Olá, Janaine! Sou assinante do Trio Playback e preciso de ajuda para entrar no app.");
 const CONTACT = `<div class="card small" style="gap:6px">
@@ -386,8 +389,8 @@ function viewSong() {
       ${S.addTo ? `<div class="list">${S.playlists.map(p => { const has = (p.items || []).includes(s.id); return `<button class="row" data-a="addpl" data-pl="${p.id}" ${has ? "disabled" : ""}><span class="name">${esc(p.name)}</span><span class="pill ${has ? "ok" : ""}">${has ? "Já está" : (p.items || []).length + " músicas"}</span></button>`; }).join("")}
         <form class="hrow" id="newPlFromSong"><input class="field" style="flex:1" id="newPlName" placeholder="Nome da nova playlist" aria-label="Nome da nova playlist"><button class="btn sm" type="submit">Criar e adicionar</button></form></div>` : ""}
     </div>
-    ${S.isAdmin ? `<div class="card" style="border-color:var(--bronze)">
-      <div class="hrow spread"><b>Gravar meu vídeo</b><span class="pill brass">teste, só você vê</span></div>
+    ${canTest() ? `<div class="card" style="border-color:var(--bronze)">
+      <div class="hrow spread"><b>Gravar meu vídeo</b><span class="pill brass">${S.isAdmin ? "teste, só você e as testadoras veem" : "em teste"}</span></div>
       <p class="small muted" style="margin:0">Grave você cantando com o playback do tom ${esc(k)} no fone. Depois ajuste o volume da voz e do playback, acerte a sincronia e salve o vídeo.</p>
       <button class="btn primary" data-a="record" ${available(s.id) ? "" : "disabled"}>Gravar</button>
     </div>` : ""}
