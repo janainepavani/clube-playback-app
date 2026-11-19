@@ -4,6 +4,10 @@
 import { ACERVO_PIANO, ACERVO_TRIO } from "./acervo.js";
 // músicas novas incluídas pelo próprio relatório ficam em config/acervo (campo extra) no Firestore
 let EXTRA = [];
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+let COUNT_LETRA = lsGet("cp-rel-letra") === "1"; // padrão: letra fora das pendências
+const lastSent = () => { try { return JSON.parse(lsGet("cp-last-sent") || "[]"); } catch (e) { return []; } };
 const listTrio = () => ACERVO_TRIO.concat(EXTRA.filter(e => e.fmt === "trio").map(e => [e.name, e.tons || "", e.bpm || ""]));
 const listPiano = () => ACERVO_PIANO.concat(EXTRA.filter(e => e.fmt === "piano").map(e => [e.name, e.tons || "", e.bpm || ""]));
 
@@ -72,7 +76,7 @@ function row(fmt, name, tons, bpmAcervo, s, soApp) {
     if (miss.length) r.semPart.push(k.key + ": " + miss.join(" e "));
   }
   if (r.foraTons.length) r.falta.push("falta o tom " + r.foraTons.join(", "));
-  if (!r.letra) r.falta.push("falta a letra");
+  if (!r.letra && COUNT_LETRA) r.falta.push("falta a letra");
   if (r.semPart.length) r.falta.push("falta partitura (" + r.semPart.join("; ") + ")");
   if (!r.bpm) r.falta.push("falta o BPM");
   if (soApp) r.falta.push("não está na lista do acervo");
@@ -158,22 +162,24 @@ export function openRelatorio(ctx) {
 
   function render() {
     const rows = build();
+    const recent = new Set(lastSent().map(x => x.id));
     const sum = f => { const all = rows.filter(r => r.fmt === f && !r.soApp), on = all.filter(r => r.inApp), ok = on.filter(r => !r.falta.length); return { all: all.length, on: on.length, ok: ok.length }; };
     const t = sum("trio"), p = sum("piano");
     const cnt = (f, test) => rows.filter(r => (f === "all" || r.fmt === f) && test(r)).length;
     const vis = rows.filter(r => (S.fmt === "all" || r.fmt === S.fmt)
-      && (S.sit === "all" || (S.sit === "wrong" && r.soApp) || (S.sit === "pend" && r.inApp && r.falta.length) || (S.sit === "fora" && !r.inApp) || (S.sit === "ok" && r.inApp && !r.falta.length)
+      && (S.sit === "all" || (S.sit === "recent" && r.id && recent.has(r.id)) || (S.sit === "wrong" && r.soApp) || (S.sit === "pend" && r.inApp && r.falta.length) || (S.sit === "fora" && !r.inApp) || (S.sit === "ok" && r.inApp && !r.falta.length)
         || (S.sit === "bpm" && r.inApp && !r.bpm) || (S.sit === "letra" && r.inApp && !r.letra) || (S.sit === "part" && r.semPart && r.semPart.length))
       && (!S.q || C.norm(r.name).includes(C.norm(S.q))))
       .sort((a, b) => C.norm(a.name).localeCompare(C.norm(b.name)));
     const tab = (k, v, l) => `<button type="button" role="radio" aria-selected="${S[k] === v}" data-rk="${k}" data-rv="${v}">${l}</button>`;
-    const sit = [["pend", "Com pendência", cnt(S.fmt, r => r.inApp && r.falta.length)], ["fora", "Fora do app", cnt(S.fmt, r => !r.inApp)], ["ok", "Completas", cnt(S.fmt, r => r.inApp && !r.falta.length)],
+    const sit = [...(recent.size ? [["recent", "Últimas enviadas", cnt(S.fmt, r => r.id && recent.has(r.id))]] : []), ["pend", "Com pendência", cnt(S.fmt, r => r.inApp && r.falta.length)], ["fora", "Fora do app", cnt(S.fmt, r => !r.inApp)], ["ok", "Completas", cnt(S.fmt, r => r.inApp && !r.falta.length)],
       ["bpm", "Sem BPM", cnt(S.fmt, r => r.inApp && !r.bpm)], ["letra", "Sem letra", cnt(S.fmt, r => r.inApp && !r.letra)], ["part", "Sem partitura", cnt(S.fmt, r => r.semPart && r.semPart.length)], ["all", "Todas", cnt(S.fmt, () => true)]];
     box.innerHTML = `<div class="hrow spread"><h1 class="title">Relatório do acervo</h1><button class="btn sm" data-r="close">Fechar</button></div>
       <div class="card"><div class="hrow" style="gap:18px;flex-wrap:wrap">
         <div><b>Trio</b><div class="small muted">${t.on} de ${t.all} no app  ·  ${t.ok} completas</div></div>
         <div><b>Piano</b><div class="small muted">${p.on} de ${p.all} no app  ·  ${p.ok} completas</div></div></div>
-        <p class="small muted" style="margin:0">Completa = todos os tons com vídeo, letra, BPM e, no Trio, duas partituras em cada tom: a sheet music e a da melodia (a da melodia precisa ter "melodia" no nome). No Piano a partitura não é cobrada.</p>
+        <p class="small muted" style="margin:0">Completa = todos os tons com vídeo, BPM${COUNT_LETRA ? ", letra" : ""} e, no Trio, duas partituras em cada tom: a sheet music e a da melodia (a da melodia precisa ter "melodia" no nome). No Piano a partitura não é cobrada.</p>
+        <button class="btn sm ${COUNT_LETRA ? "primary" : "ghost"}" data-r="letratoggle">${COUNT_LETRA ? "Letra conta como pendência (toque para tirar)" : "Letra não conta como pendência (toque para contar)"}</button>
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
       ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
       ${(() => { const n = bpmPlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>Já sei o BPM de ${n} ${n > 1 ? "músicas que estão" : "música que está"} sem BPM no app</b>
@@ -229,6 +235,7 @@ export function openRelatorio(ctx) {
     else if (b.dataset.r === "autofix") autoFix();
     else if (b.dataset.r === "genfix") genFix();
     else if (b.dataset.r === "bpmfill") bpmFill();
+    else if (b.dataset.r === "letratoggle") { COUNT_LETRA = !COUNT_LETRA; lsSet("cp-rel-letra", COUNT_LETRA ? "1" : "0"); render(); }
     else if (b.dataset.r === "addnew") {
       const x = songNow(b.dataset.id); if (!x) return;
       const fmt = x.formacao === "piano" ? "piano" : "trio";

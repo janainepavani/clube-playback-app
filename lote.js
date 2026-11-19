@@ -293,8 +293,10 @@ export function openLote(ctx) {
     if (S.step === "done") {
       const bad = S.log.filter(l => !l.ok);
       box.innerHTML = `<h1 class="title">${bad.length ? "Terminou, com " + bad.length + " erro" + (bad.length > 1 ? "s" : "") : "Tudo enviado"}</h1>
-        <div class="list">${S.log.map(l => `<div class="row"><span class="name small">${C.esc(l.name)}${l.ok ? "" : `<br><span class="small" style="color:var(--bad)">${C.esc(l.err)}</span>`}</span><span class="pill ${l.ok ? "ok" : "bad"}">${l.ok ? "enviada" : "erro"}</span></div>`).join("")}</div>
+        <p class="small muted" style="margin:0">Toque em Abrir para conferir e corrigir uma música. Ao salvar, você volta para a lista das últimas enviadas (fica guardada no relatório, em "Últimas enviadas", até o próximo envio).</p>
+        <div class="list">${S.log.map(l => `<div class="row"><span class="name small">${C.esc(l.name)}  <span class="pill fmt-${l.fmt || "trio"}">${l.fmt === "piano" ? "Piano" : "Trio"}</span>${l.ok ? "" : `<br><span class="small" style="color:var(--bad)">${C.esc(l.err)}</span>`}</span><span class="meta">${l.ok ? `<button class="btn sm primary" data-l="open" data-id="${C.esc(l.id)}">Abrir</button>` : `<span class="pill bad">erro</span>`}</span></div>`).join("")}</div>
         ${bad.length ? `<p class="small muted" style="margin:0">Pode escolher a mesma pasta de novo: o que já foi enviado fica de fora sozinho.</p>` : ""}
+        ${S.log.some(l => l.ok) ? `<button class="btn" data-l="recent">Ver as enviadas no relatório (com as pendências)</button>` : ""}
         <button class="btn primary" data-l="close">Voltar ao painel</button><button class="btn" data-l="restart">Enviar outra pasta</button>`;
     }
   }
@@ -356,12 +358,14 @@ export function openLote(ctx) {
           name: ex ? ex.name : g.name, formacao: g.fmt, bpm: g.bpm || (ex && ex.bpm) || null, letra,
           keys: keys.filter(k => k.video).map(k => ({ key: k.key, video: k.video, sheets: k.sheets || [] }))
         });
-        S.log.push({ name: g.name, ok: true });
+        S.log.push({ name: g.name, ok: true, id, fmt: g.fmt });
       } catch (e) { console.warn(e); S.log.push({ name: g.name, ok: false, err: "Erro ao enviar: " + (e.code || e.message) }); }
       render();
     }
     try { if (wake) wake.release(); } catch (e) {}
-    S.busy = false; S.step = "done"; render();
+    S.busy = false; S.step = "done";
+    try { localStorage.setItem("cp-last-sent", JSON.stringify(S.log.filter(l => l.ok).map(l => ({ id: l.id, name: l.name, fmt: l.fmt, at: Date.now() })))); } catch (e) {}
+    render();
   }
 
   // eventos
@@ -370,6 +374,8 @@ export function openLote(ctx) {
     if (b.dataset.l === "close") close();
     else if (b.dataset.l === "restart") { S.step = "pick"; S.items = []; S.groups = []; render(); }
     else if (b.dataset.l === "send") send();
+    else if (b.dataset.l === "open") { close(); C.openSong && C.openSong(b.dataset.id); }
+    else if (b.dataset.l === "recent") { close(); C.openRecent && C.openRecent(); }
     else if (b.dataset.l === "first") { const g = group(b.dataset.g); g.order = [b.dataset.t, ...g.order.filter(t => t !== b.dataset.t)]; render(); }
     else if (b.dataset.fmt) { S.fmt = b.dataset.fmt; render(); }
     else if (b.dataset.gfmt) { const g = group(b.dataset.g); if (g) { g.fmt = b.dataset.gfmt; applyExisting(); render(); } }

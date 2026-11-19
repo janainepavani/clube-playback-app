@@ -1036,7 +1036,7 @@ document.addEventListener("click", async e => {
     else if (a === "rmallowed") { await deleteDoc(doc(db, "allowed", el.dataset.em)); S.adminData = null; render(); }
     else if (a === "relatorio") {
       el.disabled = true;
-      try { await openRel(); } catch (err) { console.warn(err); toast("Não consegui abrir o relatório."); }
+      try { relState = null; await openRel(); } catch (err) { console.warn(err); toast("Não consegui abrir o relatório."); }
       finally { el.disabled = false; }
     }
     else if (a === "lote") {
@@ -1045,6 +1045,9 @@ document.addEventListener("click", async e => {
         const mod = await import("./lote.js");
         mod.openLote({
           getSongs: () => S.songs, toast, esc, norm, slug, mb, sheetsOf, upload: (path, file, onProg) => upload(path, file, onProg),
+          // depois do envio: abrir uma música para corrigir; ao salvar, volta ao relatório nas "Últimas enviadas"
+          openSong: id => { const s = byId(id); if (!s) return toast("A música ainda está chegando, tente de novo."); relState = { fmt: "all", sit: "recent", q: "", y: 0 }; relFrom = true; adminForm = JSON.parse(JSON.stringify({ id: s.id, name: s.name, formacao: fmtOf(s), bpm: s.bpm, letra: s.letra, keys: s.keys })); render(); window.scrollTo(0, 0); },
+          openRecent: () => { relState = { fmt: "all", sit: "recent", q: "", y: 0 }; openRel().catch(e => console.warn(e)); },
           saveSong: (id, data) => setDoc(doc(db, "songs", id), { ...data, updatedAt: serverTimestamp() })
         });
       } catch (err) { console.warn(err); toast("Não consegui abrir o envio de pasta."); }
