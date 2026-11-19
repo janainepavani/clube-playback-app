@@ -6,7 +6,7 @@ import { ACERVO_PIANO, ACERVO_TRIO } from "./acervo.js";
 let C = null;
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const TONE = /([A-G])(#|b|♯|♭)?(m)?(?![a-z])/;
-const toneKey = s => { const m = String(s || "").match(TONE); return m ? (m[1] + (m[2] || "").replace("♯", "#").replace("♭", "b") + (m[3] || "")) : C.norm(s); };
+const toneKey = s => { s = String(s || "").replace(/^\s*[FIM]\s*-\s*/, ""); const m = String(s || "").match(TONE); return m ? (m[1] + (m[2] || "").replace("♯", "#").replace("♭", "b") + (m[3] || "")) : C.norm(s); };
 const matchKey = s => C.slug(s).replace(/(^|-)ii($|-)/g, "$12$2").replace(/(^|-)(o|a|os|as)(-|$)/g, "$1$3").replace(/-+/g, "-").replace(/^-|-$/g, "");
 
 function build() {

@@ -12,7 +12,7 @@
 const CAT = new Set(["video", "videos", "partitura", "partituras", "letra", "letras", "audio", "audios", "mp4", "pdf", "pdfs",
   "720p", "720", "1080p", "1080", "clube app", "app", "convertido", "convertidos", "convertida", "convertidas", "handbrake",
   "karaoke", "karaokes", "wav", "mp3", "arquivos", "arquivo", "playback", "playbacks", "trio", "piano", "trio playback",
-  "piano playback", "clube playback", "lyric", "lyrics", "lyric video", "lyric videos", "finais", "final", "export", "exportados", "novos", "novas"]);
+  "piano playback", "clube playback", "pp", "tp", "fem", "feminina", "feminino", "masc", "masculina", "masculino", "inter", "intermediaria", "intermediario", "lyric", "lyrics", "lyric video", "lyric videos", "finais", "final", "export", "exportados", "novos", "novas"]);
 const VIDEO_EXT = ["mp4", "m4v", "mov"], DOC_EXT = ["pdf", "jpg", "jpeg", "png", "webp"], AUDIO_EXT = ["mp3", "wav", "aif", "aiff", "m4a", "flac", "aac", "ogg"];
 const TONE = /^([A-G])(#|b|♯|♭)?(m)?$/;
 const SPLIT = /[\s_\-.()[\],+&]+/;
@@ -27,10 +27,22 @@ const fixTone = t => t.replace("♯", "#").replace("♭", "b");
 // Piano Playback: "F-E" = Feminina em E, "I-G" = Intermediária em G, "M-C" = Masculina em C
 const GEN = /(^|[\s_(])([FIM])\s*[-–_]\s*([A-G](?:#|b|♯|♭)?m?)(?=$|[\s_\-.)])/g;
 const GEN_RANK = { F: 0, I: 1, M: 2 };
+const splitKey = k => { const m = String(k || "").trim().match(/^([FIM])\s*-\s*(.+)$/); return m ? { g: m[1], t: m[2] } : { g: "", t: String(k || "").trim() }; };
+function keyEq(a, b) { const x = splitKey(a), y = splitKey(b); return x.t.toLowerCase() === y.t.toLowerCase() && (!x.g || !y.g || x.g === y.g); }
+// Nos arquivos: FEM / INTER / MASC (ou Feminina...) com o tom em outra palavra do nome
+const GW = { fem: "F", feminina: "F", feminino: "F", inter: "I", intermediaria: "I", intermediario: "I", masc: "M", masculina: "M", masculino: "M" };
 function genIn(s) {
   let m, last = null; GEN.lastIndex = 0;
   while ((m = GEN.exec(String(s || "")))) last = m;
-  if (!last) return null;
+  if (!last) {
+    const parts = String(s || "").split(/([\s_\-.()[\]]+)/);
+    const gi = parts.findIndex(t => GW[C.norm(t)]); if (gi < 0) return null;
+    let ti = -1, best = 1e9;
+    parts.forEach((t, i) => { if (i !== gi && TONE.test(fixTone(t)) && Math.abs(i - gi) < best) { best = Math.abs(i - gi); ti = i; } });
+    const g = GW[C.norm(parts[gi])], tone = ti >= 0 ? fixTone(parts[ti]) : "";
+    const rest = parts.map((t, i) => (i === gi || i === ti) ? " " : t).join("").replace(/\s+/g, " ").trim();
+    return { g, tone, rest };
+  }
   const str = String(s); const at = last.index + last[1].length;
   return { g: last[2], tone: fixTone(last[3]), rest: (str.slice(0, at) + " " + str.slice(at + last[0].length - last[1].length)).replace(/\s+/g, " ").trim() };
 }
@@ -119,24 +131,28 @@ export function openLote(ctx) {
     const dirsOf = x => x.rel.split("/").slice(0, -1);
     const meta = list.map(x => {
       const dirs = dirsOf(x); const keep = dirs.filter(d => !isCat(d));
-      const fmtHint = dirs.some(d => /piano/i.test(d)) ? "piano" : dirs.some(d => /trio/i.test(d)) ? "trio" : "";
+      const all = [...dirs, baseOf(x.file.name)];
+      const fmtHint = all.some(d => /(^|[^a-z])pp([^a-z]|$)/i.test(d)) ? "piano" : all.some(d => /(^|[^a-z])tp([^a-z]|$)/i.test(d)) ? "trio"
+        : dirs.some(d => /piano/i.test(d)) ? "piano" : dirs.some(d => /trio/i.test(d)) ? "trio" : "";
       return { ...x, dirs, keep, fmtHint };
     });
     const genStyle = meta.some(m => genIn(baseOf(m.file.name)));
-    const sff = n => songFromFile(n, genStyle);
+    // no Piano com padrão de gênero, uma letra solta no nome (ex.: "A paz") não é tom; no Trio é
+    const strict = m => genStyle && (m.fmtHint || S.fmt) === "piano";
+    const sff = (n, m) => songFromFile(n, m ? strict(m) : genStyle);
     const anyDeep = meta.some(m => m.keep.length >= 2);
     const rootName = meta[0].dirs[0] || "";
     const rootIsSong = rootName && !isCat(rootName);
     const loose = meta.filter(m => !(anyDeep ? m.keep.length >= 2 : false));
     // arquivos soltos: usar a pasta como nome se os vídeos não mostrarem nomes diferentes
-    const looseVideoNames = new Set(loose.filter(m => VIDEO_EXT.includes(extOf(m.file.name))).map(m => C.slug(sff(m.file.name))).filter(Boolean));
+    const looseVideoNames = new Set(loose.filter(m => VIDEO_EXT.includes(extOf(m.file.name))).map(m => C.slug(sff(m.file.name, m))).filter(Boolean));
     const looseUseRoot = rootIsSong && !anyDeep && looseVideoNames.size <= 1;
     for (const m of meta) {
       let song = "";
       if (anyDeep && m.keep.length >= 2) song = (rootIsSong && m.keep[0] === rootName) ? m.keep[1] : m.keep[0];
       else if (looseUseRoot) song = rootName;
       else if (anyDeep && m.keep.length === 1 && m.keep[0] !== rootName) song = m.keep[0];
-      if (!song) { song = sff(m.file.name); m.fromFile = true; }
+      if (!song) { song = sff(m.file.name, m); m.fromFile = true; }
       m.song = cleanSong(song) || "Sem nome";
     }
     // partitura/letra solta com nome mais comprido ("Andança Baixo") vai para a música do vídeo ("Andança")
@@ -159,7 +175,7 @@ export function openLote(ctx) {
       const ext = extOf(m.file.name);
       // tom: no arquivo; se não tiver, na subpasta mais próxima
       const gmf = genIn(baseOf(m.file.name));
-      let tone = gmf ? gmf.tone : genStyle || /letra/.test(C.norm(m.file.name)) ? "" : toneIn(baseOf(m.file.name)); if (!tone && !genStyle) for (let i = m.dirs.length - 1; i >= 0 && !tone; i--) tone = (m.dirs[i].split(SPLIT).length <= 3) ? toneIn(m.dirs[i]) : "";
+      let tone = gmf ? (gmf.tone ? gmf.g + "-" + gmf.tone : "") : strict(m) || /letra/.test(C.norm(m.file.name)) ? "" : toneIn(baseOf(m.file.name)); if (!tone && !strict(m)) for (let i = m.dirs.length - 1; i >= 0 && !tone; i--) tone = (m.dirs[i].split(SPLIT).length <= 3) ? toneIn(m.dirs[i]) : "";
       let type = "skip", note = "";
       if (VIDEO_EXT.includes(ext)) type = "video";
       else if (DOC_EXT.includes(ext)) type = /letra/.test(C.norm(m.file.name)) ? "letra" : "sheet";
@@ -193,7 +209,7 @@ export function openLote(ctx) {
       for (const it of S.items.filter(i => i.gid === g.gid)) {
         if (it.auto) { it.type = it.auto.type; it.note = it.auto.note; delete it.auto; }
         if (!ex) continue;
-        const kd = (ex.keys || []).find(k => C.norm(k.key) === C.norm(it.tone));
+        const kd = (ex.keys || []).find(k => keyEq(k.key, it.tone));
         let why = "";
         if (it.type === "video" && kd && kd.video) why = "esse tom já tem vídeo";
         if (it.type === "letra" && ex.letra) why = "essa música já tem letra";
@@ -204,7 +220,7 @@ export function openLote(ctx) {
       const tones = [];
       (ex ? ex.keys.map(k => k.key) : []).forEach(t => tones.includes(t) || tones.push(t));
       S.items.filter(i => i.gid === g.gid && i.type !== "skip" && i.type !== "letra" && i.tone).sort((a, b) => (GEN_RANK[a.g] ?? 9) - (GEN_RANK[b.g] ?? 9) || a.file.name.localeCompare(b.file.name)).forEach(i => {
-        const same = tones.find(t => C.norm(t) === C.norm(i.tone)); if (same) i.tone = same; else tones.push(i.tone);
+        const same = tones.find(t => keyEq(t, i.tone)); if (same) i.tone = same; else tones.push(i.tone);
       });
       g.order = g.order.filter(t => tones.includes(t)).concat(tones.filter(t => !g.order.includes(t)));
     }
@@ -217,7 +233,7 @@ export function openLote(ctx) {
     if (!its.length) return { ok: false, idle: true, text: "Nada para enviar" };
     const ex = findSong(g.name, g.fmt);
     if (its.some(i => (i.type === "video" || i.type === "sheet") && !i.tone)) return { ok: false, text: "Falta escolher o tom de algum arquivo" };
-    const has = t => its.some(i => i.type === "video" && C.norm(i.tone) === C.norm(t)) || (ex && (ex.keys || []).some(k => C.norm(k.key) === C.norm(t) && k.video));
+    const has = t => its.some(i => i.type === "video" && keyEq(i.tone, t)) || (ex && (ex.keys || []).some(k => keyEq(k.key, t) && k.video));
     const miss = g.order.filter(t => !has(t));
     if (miss.length) return { ok: false, text: "Falta o vídeo do tom " + miss.join(", ") };
     return { ok: true, text: ex ? "Vai completar a música que já existe" : "Música nova, pronta" };
@@ -304,7 +320,7 @@ export function openLote(ctx) {
       const keys = ex ? JSON.parse(JSON.stringify(ex.keys || [])) : [];
       keys.forEach(k => { k.sheets = C.sheetsOf(k); delete k.sheet; });
       let letra = ex ? ex.letra || null : null;
-      const keyFor = t => { let k = keys.find(x => C.norm(x.key) === C.norm(t)); if (!k) { k = { key: t, video: null, sheets: [] }; keys.push(k); } return k; };
+      const keyFor = t => { let k = keys.find(x => keyEq(x.key, t)); if (!k) { k = { key: t, video: null, sheets: [] }; keys.push(k); } return k; };
       try {
         for (const it of its) {
           S.now = g.name + ": enviando " + it.file.name; const p = box.querySelector("#lnow"); if (p) p.textContent = S.now;
@@ -320,7 +336,7 @@ export function openLote(ctx) {
           else { const k = keyFor(it.tone); k.sheets = k.sheets.filter(s => C.norm(s.label) !== C.norm(it.label)); k.sheets.push({ label: it.label || "Partitura", path }); }
         }
         // ordem dos tons escolhida na conferência
-        keys.sort((a, b) => { const ia = g.order.findIndex(t => C.norm(t) === C.norm(a.key)), ib = g.order.findIndex(t => C.norm(t) === C.norm(b.key)); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+        keys.sort((a, b) => { const ia = g.order.findIndex(t => keyEq(t, a.key)), ib = g.order.findIndex(t => keyEq(t, b.key)); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
         await C.saveSong(id, {
           name: ex ? ex.name : g.name, formacao: g.fmt, bpm: g.bpm || (ex && ex.bpm) || null, letra,
           keys: keys.filter(k => k.video).map(k => ({ key: k.key, video: k.video, sheets: k.sheets || [] }))
@@ -350,7 +366,7 @@ export function openLote(ctx) {
     if (d.gname) { const g = group(d.gname); g.name = t.value.trim() || g.name; const ex = findSong(g.name, g.fmt); if (ex && ex.bpm && !g.bpm) g.bpm = ex.bpm; applyExisting(); }
     else if (d.gbpm) group(d.gbpm).bpm = t.value.trim();
     else if (d.ity) { const i = it(d.ity); i.type = t.value; delete i.auto; i.note = ""; if (i.type === "sheet" && !i.label) i.label = sheetLabel(i.file.name, group(i.gid).name); applyExisting(); }
-    else if (d.ito) { const i = it(d.ito); i.tone = fixTone(t.value.trim()); if (i.note === "escolha o tom") i.note = ""; applyExisting(); }
+    else if (d.ito) { const i = it(d.ito); i.tone = fixTone(t.value.trim()).replace(/^([fim])\s*-\s*/i, (_, g) => g.toUpperCase() + "-"); if (i.note === "escolha o tom") i.note = ""; applyExisting(); }
     else if (d.ila) { it(d.ila).label = t.value.trim(); applyExisting(); }
     else if (d.igr) {
       const i = it(d.igr);
