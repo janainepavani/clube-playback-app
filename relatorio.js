@@ -2,6 +2,10 @@
 // e mostra o que falta em cada música (vídeo de algum tom, letra, partitura, BPM).
 // Baixa tudo como planilha (CSV, abre no Excel e no Google Planilhas).
 import { ACERVO_PIANO, ACERVO_TRIO } from "./acervo.js";
+// músicas novas incluídas pelo próprio relatório ficam em config/acervo (campo extra) no Firestore
+let EXTRA = [];
+const listTrio = () => ACERVO_TRIO.concat(EXTRA.filter(e => e.fmt === "trio").map(e => [e.name, e.tons || "", e.bpm || ""]));
+const listPiano = () => ACERVO_PIANO.concat(EXTRA.filter(e => e.fmt === "piano").map(e => [e.name, e.tons || "", e.bpm || ""]));
 
 let C = null;
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
@@ -25,7 +29,7 @@ function parseWrong(name) {
   });
   return { base: toks.join(" ").trim(), g, fmt };
 }
-const acervoAll = () => [...ACERVO_TRIO.map(a => ({ name: a[0], fmt: "trio" })), ...ACERVO_PIANO.map(a => ({ name: a[0], fmt: "piano" }))];
+const acervoAll = () => [...listTrio().map(a => ({ name: a[0], fmt: "trio" })), ...listPiano().map(a => ({ name: a[0], fmt: "piano" }))];
 const sameKey = (a, b) => { const x = /^([FIM])-(.+)$/.exec(a) || [0, "", a], y = /^([FIM])-(.+)$/.exec(b) || [0, "", b]; return x[2].toLowerCase() === y[2].toLowerCase() && (!x[1] || !y[1] || x[1] === y[1]); };
 // sugestão automática: qual música do acervo é esta
 function suggest(s) {
@@ -37,7 +41,7 @@ function suggest(s) {
 let LOCAL = {};
 function build() {
   const songs = C.getSongs().filter(x => LOCAL[x.id] !== null).map(x => LOCAL[x.id] || x).concat(Object.values(LOCAL).filter(x => x && !C.getSongs().some(y => y.id === x.id))); const used = new Set(); const rows = [];
-  for (const [fmt, list] of [["trio", ACERVO_TRIO], ["piano", ACERVO_PIANO]]) {
+  for (const [fmt, list] of [["trio", listTrio()], ["piano", listPiano()]]) {
     for (const [name, tons, bpm] of list) {
       const s = songs.find(x => !used.has(x.id) && (x.formacao === "piano" ? "piano" : "trio") === fmt && matchKey(x.name) === matchKey(name));
       if (s) used.add(s.id);
@@ -60,7 +64,7 @@ function row(fmt, name, tons, bpmAcervo, s, soApp) {
   if (!r.letra) r.falta.push("falta a letra");
   if (r.semPart.length) r.falta.push("falta partitura (" + r.semPart.join(", ") + ")");
   if (!r.bpm) r.falta.push("falta o BPM");
-  if (soApp) r.falta.push("não achei na lista do acervo (confira o nome)");
+  if (soApp) r.falta.push("não está na lista do acervo");
   return r;
 }
 
@@ -126,8 +130,8 @@ export function openRelatorio(ctx) {
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
       ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
       ${(() => { const w = rows.filter(r => r.soApp); if (!w.length) return ""; const auto = w.filter(r => suggest(songNow(r.id) || { name: r.name })).length;
-        return `<div class="card" style="border-color:var(--warn)"><b>${w.length} ${w.length > 1 ? "músicas entraram" : "música entrou"} com nome que não bate com o acervo</b>
-          <p class="small muted" style="margin:0">Em cada uma, escolha qual é a música certa e toque em Juntar: os vídeos, letras e partituras passam para a música certa e a errada some. Ou toque em Apagar.</p>
+        return `<div class="card" style="border-color:var(--warn)"><b>${w.length} ${w.length > 1 ? "músicas do app não estão" : "música do app não está"} na lista do acervo</b>
+          <p class="small muted" style="margin:0">Em cada uma, me diga: se é música nova, toque em "Sim, é nova" e ela entra na lista. Se entrou com o nome errado, escolha a música certa e toque em Juntar (vídeos, letras e partituras passam para a certa e a errada some). Ou Apagar.</p>
           ${auto ? `<button class="btn primary" data-r="autofix">Corrigir ${auto} automaticamente</button>` : ""}
           <button class="btn sm ghost" data-rk="sit" data-rv="wrong">Ver só essas (${w.length})</button></div>`; })()}
       <datalist id="acv">${acervoAll().map(a => `<option value="${C.esc(a.name)} (${a.fmt === "trio" ? "Trio" : "Piano"})">`).join("")}</datalist>
@@ -138,7 +142,10 @@ export function openRelatorio(ctx) {
         <span class="name" style="flex:1 1 100%">${C.esc(r.name)}  <span class="pill fmt-${r.fmt}">${r.fmt === "trio" ? "Trio" : "Piano"}</span>${r.inApp ? "" : `  <span class="pill">fora do app</span>`}
           <br><span class="small muted" style="font-weight:500">Tons: ${(r.tons.length ? r.tons : r.appKeys).map(x => C.esc(x) + (r.foraTons.includes(x) ? " (falta)" : "")).join(" / ") || "não informados"}${r.inApp ? `  ·  Letra: ${r.letra ? "tem" : "falta"}${r.fmt === "trio" ? `  ·  Partitura: ${r.semPart.length ? "falta em " + r.semPart.map(C.esc).join(", ") : "tem"}` : ""}` : ""}</span>
           ${r.falta.length && r.inApp ? `<br><span class="small" style="color:var(--warn)">${C.esc(r.falta.join("; "))}</span>` : ""}</span>
-        ${r.soApp ? (() => { const sg = suggest(songNow(r.id) || { name: r.name }); return `<div class="hrow" style="flex:1 1 100%;flex-wrap:wrap;gap:6px"><input class="field" style="flex:1;min-width:180px;padding:6px 8px" list="acv" data-fix="${r.id}" placeholder="Qual é a música certa?" value="${sg ? C.esc(sg.name + " (" + (sg.fmt === "trio" ? "Trio" : "Piano") + ")") : ""}"><button class="btn sm primary" data-r="join" data-id="${r.id}">Juntar</button><button class="btn sm danger" data-r="del" data-id="${r.id}">Apagar</button></div>`; })() : ""}
+        ${r.soApp ? (() => { const sg = suggest(songNow(r.id) || { name: r.name }); return `<div class="stack" style="flex:1 1 100%;gap:8px;padding:10px;border:1px solid var(--warn);border-radius:10px">
+          ${sg ? `<b class="small">Parece ser "${C.esc(sg.name)}" (${sg.fmt === "trio" ? "Trio" : "Piano"}) com o nome errado. Ou é uma música nova?</b>` : `<b class="small">Essa música não está na minha lista do acervo. É uma música nova?</b>`}
+          <div class="hrow" style="flex-wrap:wrap;gap:6px"><button class="btn sm ${sg ? "" : "primary"}" data-r="addnew" data-id="${r.id}">Sim, é nova: incluir no acervo</button><button class="btn sm danger" data-r="del" data-id="${r.id}">Apagar</button></div>
+          <div class="hrow" style="flex-wrap:wrap;gap:6px"><input class="field" style="flex:1;min-width:180px;padding:6px 8px" list="acv" data-fix="${r.id}" placeholder="Não, é esta música do acervo..." value="${sg ? C.esc(sg.name + " (" + (sg.fmt === "trio" ? "Trio" : "Piano") + ")") : ""}"><button class="btn sm ${sg ? "primary" : ""}" data-r="join" data-id="${r.id}">Juntar</button></div></div>`; })() : ""}
         ${r.inApp ? `<button class="btn sm primary" data-r="open" data-id="${r.id}">Abrir</button>` : `<button class="btn sm" data-r="new" data-n="${C.esc(r.name)}" data-f="${r.fmt}" data-t="${C.esc(r.tons.join("/"))}" data-b="${C.esc(r.bpmSug)}">Cadastrar</button>`}
         ${r.inApp ? `<label class="small muted" style="display:flex;align-items:center;gap:6px">BPM <input class="field" style="width:80px;padding:6px 8px" inputmode="numeric" data-bpm="${r.id}" value="${C.esc(r.bpm)}" placeholder="${C.esc(r.bpmSug)}"></label>${!r.bpm && r.bpmSug ? `<button class="btn sm ghost" data-r="usebpm" data-id="${r.id}" data-v="${C.esc(r.bpmSug)}">Usar ${C.esc(r.bpmSug)}</button>` : ""}` : ""}
       </div>`).join("") || `<p class="muted">Nenhuma música aqui.</p>`}</div>`;
@@ -167,6 +174,12 @@ export function openRelatorio(ctx) {
     else if (b.dataset.r === "open") { const st = { fmt: S.fmt, sit: S.sit, q: S.q, y: root.scrollTop }; close(); C.openSong(b.dataset.id, st); }
     else if (b.dataset.r === "new") { const st = { fmt: S.fmt, sit: S.sit, q: S.q, y: root.scrollTop }; close(); C.newSong(b.dataset.n, b.dataset.f, b.dataset.t ? b.dataset.t.split("/") : [], b.dataset.b, st); }
     else if (b.dataset.r === "autofix") autoFix();
+    else if (b.dataset.r === "addnew") {
+      const x = songNow(b.dataset.id); if (!x) return;
+      const fmt = x.formacao === "piano" ? "piano" : "trio";
+      const item = { name: x.name, fmt, tons: (x.keys || []).map(k => String(k.key).replace(/^[FIM]-/, "")).join("/"), bpm: x.bpm || "" };
+      (async () => { try { EXTRA = EXTRA.filter(e => !(e.fmt === fmt && matchKey(e.name) === matchKey(x.name))).concat([item]); await C.saveExtras(EXTRA); C.toast("Incluí " + x.name + " no acervo do " + (fmt === "trio" ? "Trio" : "Piano") + "."); } catch (e) { console.warn(e); C.toast("Não consegui incluir: " + (e.code || e.message)); } render(); })();
+    }
     else if (b.dataset.r === "join") {
       const v = (box.querySelector(`[data-fix="${b.dataset.id}"]`) || {}).value || ""; const m = v.match(/^(.*?)\s*\((Trio|Piano)\)\s*$/);
       const a = m && acervoAll().find(x => x.name === m[1] && x.fmt === m[2].toLowerCase());
@@ -189,5 +202,6 @@ export function openRelatorio(ctx) {
     const f = box.querySelector("#rq"); f.focus(); try { f.setSelectionRange(pos, pos); } catch (er) {}
   });
   render();
+  (async () => { try { EXTRA = (await C.getExtras()) || []; render(); } catch (e) { console.warn(e); } })();
   if (S.y) requestAnimationFrame(() => { root.scrollTop = S.y; });
 }

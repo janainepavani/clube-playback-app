@@ -715,6 +715,8 @@ async function openRel() {
     saveBpm: (id, bpm) => updateDoc(doc(db, "songs", id), { bpm }),
     saveSong: (id, data) => setDoc(doc(db, "songs", id), { ...data, updatedAt: serverTimestamp() }),
     deleteSong: id => deleteDoc(doc(db, "songs", id)),
+    getExtras: async () => { const d = await getDoc(doc(db, "config", "acervo")); return d.exists() ? (d.data().extra || []) : []; },
+    saveExtras: extra => setDoc(doc(db, "config", "acervo"), { extra, updatedAt: serverTimestamp() }),
     openSong: (id, st) => { const s = byId(id); if (!s) return; relState = st; relFrom = true; adminForm = JSON.parse(JSON.stringify({ id: s.id, name: s.name, formacao: fmtOf(s), bpm: s.bpm, letra: s.letra, keys: s.keys })); render(); window.scrollTo(0, 0); },
     newSong: (name, fmt, tons, bpm, st) => { relState = st; relFrom = true; adminForm = { name, formacao: fmt, bpm: bpm || "", letra: null, keys: (tons.length ? tons : ["", ""]).map(k => ({ key: k, video: null, sheets: [] })) }; render(); window.scrollTo(0, 0); }
   });
