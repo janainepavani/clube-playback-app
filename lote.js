@@ -78,8 +78,12 @@ function toneIn(s) {
   return "";
 }
 // tira número na frente ("01 - "), tons entre parênteses no fim ("(D/G)") e espaços extras
+// BPM no nome ("70bpm", "| 70 BPM |", "BPM 70"): sai do nome e vira o BPM da música
+const BPM_RE = /(?:^|[\s_|\-(\[])(?:(\d{2,3})\s*bpm|bpm\s*[:=]?\s*(\d{2,3}))(?=$|[\s_|\-)\].])/i;
+function bpmIn(s) { const m = String(s || "").match(BPM_RE); return m ? (m[1] || m[2]) : ""; }
+function stripBpm(s) { return String(s || "").replace(new RegExp(BPM_RE.source, "gi"), " ").replace(/\s*\|\s*/g, " ").replace(/[\s\-–_]+$/, "").replace(/^[\s\-–_]+/, "").replace(/\s+/g, " ").trim(); }
 function cleanSong(s) {
-  return String(s || "").replace(/^\s*\d+\s*[-_.)]\s*/, "").replace(/\s*[([][^)\]]*[)\]]\s*$/, m => {
+  return stripBpm(s).replace(/^\s*\d+\s*[-_.)]\s*/, "").replace(/\s*[([][^)\]]*[)\]]\s*$/, m => {
     const inner = m.replace(/[()[\]]/g, "").split(/[\s/\-,e]+/).filter(Boolean);
     return inner.length && inner.every(t => TONE.test(fixTone(t))) ? "" : m;
   }).replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
@@ -87,7 +91,7 @@ function cleanSong(s) {
 // nome da música a partir do nome do arquivo: tira o tom, as palavras de categoria e marcas de conversão
 // noTone: não procura tom solto (arquivo de letra, ou pasta no padrão F-/I-/M- do Piano)
 function songFromFile(name, noTone) {
-  const gm = genIn(baseOf(name)); const base = gm ? gm.rest : baseOf(name);
+  const gm = genIn(stripBpm(baseOf(name))); const base = gm ? gm.rest : stripBpm(baseOf(name));
   const tone = gm || noTone || /letra/.test(C.norm(name)) ? "" : toneIn(base);
   let toks = base.split(/[\s_()[\]]+/).filter(t => t && !/^[-–,.+&]+$/.test(t));
   if (tone) { const i = toks.map(fixTone).lastIndexOf(tone); if (i >= 0) toks.splice(i, 1); }
@@ -197,6 +201,7 @@ export function openLote(ctx) {
         gByName[k] = { gid: "g" + S.groups.length, name: ex ? ex.name : properName(m.song), fmt, bpm: ex && ex.bpm ? ex.bpm : "", order: [] };
         S.groups.push(gByName[k]);
       }
+      if (!gByName[k].bpm) { const b = [...m.dirs, baseOf(m.file.name)].map(bpmIn).find(Boolean); if (b) gByName[k].bpm = b; }
       const ext = extOf(m.file.name);
       // tom: no arquivo; se não tiver, na subpasta mais próxima
       const gmf = genIn(baseOf(m.file.name));
@@ -425,4 +430,4 @@ export function openLote(ctx) {
 }
 
 // usado nos testes
-export const _test = { toneIn, songFromFile, sheetLabel, cleanSong, properName, setCtx: c => { C = c; } };
+export const _test = { bpmIn, stripBpm, toneIn, songFromFile, sheetLabel, cleanSong, properName, setCtx: c => { C = c; } };

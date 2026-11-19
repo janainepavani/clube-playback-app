@@ -21,7 +21,10 @@ const matchKey = s => C.slug(s).replace(/(^|-)ii($|-)/g, "$12$2").replace(/(^|-)
 const GW = { f: "F", fem: "F", feminina: "F", feminino: "F", i: "I", inter: "I", intermediaria: "I", intermediario: "I", m: "M", masc: "M", masculina: "M", masculino: "M" };
 const GRANK = { F: 0, I: 1, M: 2 };
 // "Acaso FEM PP" -> { base: "Acaso", g: "F", fmt: "piano" }; "Acaso F" -> { base: "Acaso", g: "F" }
+const BPM_RE = /(?:^|[\s_|\-(\[])(?:(\d{2,3})\s*bpm|bpm\s*[:=]?\s*(\d{2,3}))(?=$|[\s_|\-)\].])/i;
 function parseWrong(name) {
+  const bm = String(name || "").match(BPM_RE); const bpm = bm ? (bm[1] || bm[2]) : "";
+  name = String(name || "").replace(new RegExp(BPM_RE.source, "gi"), " ").replace(/\s*\|\s*/g, " ");
   let toks = String(name || "").split(/[\s_\-]+/).filter(Boolean), g = "", fmt = "";
   toks = toks.filter((t, i) => {
     const n = C.norm(t);
@@ -31,7 +34,7 @@ function parseWrong(name) {
     if (/^(720p\d*|1080p|fast|hd|playback|video|karaoke)$/.test(n)) return false;
     return true;
   });
-  return { base: toks.join(" ").trim(), g, fmt };
+  return { base: toks.join(" ").trim(), g, fmt, bpm };
 }
 const acervoAll = () => [...listTrio().map(a => ({ name: a[0], fmt: "trio" })), ...listPiano().map(a => ({ name: a[0], fmt: "piano" }))];
 const sameKey = (a, b) => { const x = /^([FIM])-(.+)$/.exec(a) || [0, "", a], y = /^([FIM])-(.+)$/.exec(b) || [0, "", b]; return x[2].toLowerCase() === y[2].toLowerCase() && (!x[1] || !y[1] || x[1] === y[1]); };
@@ -108,7 +111,7 @@ export function openRelatorio(ctx) {
       for (const sh of C.sheetsOf(k0)) if (!k.sheets.some(x => C.norm(x.label) === C.norm(sh.label))) k.sheets.push(sh);
     }
     if (fmt === "piano") keys.sort((a, b) => (GRANK[(a.key.match(/^([FIM])-/) || [])[1]] ?? 9) - (GRANK[(b.key.match(/^([FIM])-/) || [])[1]] ?? 9));
-    const data = { name: ex ? ex.name : name, formacao: fmt, bpm: (ex && ex.bpm) || src.bpm || null, letra: (ex && ex.letra) || src.letra || null,
+    const data = { name: ex ? ex.name : name, formacao: fmt, bpm: (ex && ex.bpm) || src.bpm || parseWrong(src.name).bpm || null, letra: (ex && ex.letra) || src.letra || null,
       keys: keys.filter(k => k.video).map(k => ({ key: k.key, video: k.video, sheets: k.sheets || [] })) };
     await C.saveSong(id, data); local[id] = { id, ...data };
     if (srcId !== id) { await C.deleteSong(srcId); local[srcId] = null; }
@@ -151,7 +154,7 @@ export function openRelatorio(ctx) {
     }).join(" ");
   }
   const namePlan = () => C.getSongs().filter(x => local[x.id] !== null).map(x => local[x.id] || x)
-    .map(x => ({ x, n: properName(x.name, x.formacao === "piano" ? "piano" : "trio") })).filter(o => o.n && o.n !== o.x.name && !parseWrong(o.x.name).g && !parseWrong(o.x.name).fmt);
+    .map(x => ({ x, n: properName(x.name, x.formacao === "piano" ? "piano" : "trio") })).filter(o => o.n && o.n !== o.x.name && !parseWrong(o.x.name).g && !parseWrong(o.x.name).fmt && !parseWrong(o.x.name).bpm);
   async function nameFix() {
     const plan = namePlan(); if (!plan.length) return;
     if (!confirm("Arrumar o nome destas músicas?\n\n" + plan.map(o => o.x.name + "  →  " + o.n).join("\n"))) return;
