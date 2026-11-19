@@ -147,7 +147,8 @@ export function openLote(ctx) {
     });
     const genStyle = meta.some(m => genIn(baseOf(m.file.name)));
     // no Piano com padrão de gênero, uma letra solta no nome (ex.: "A paz") não é tom; no Trio é
-    const strict = m => genStyle && (m.fmtHint || S.fmt) === "piano";
+    const fmtOf = m => S.fmt === "auto" ? (m.fmtHint || "trio") : S.fmt; // Trio ou Piano escolhido vale para todas
+    const strict = m => genStyle && fmtOf(m) === "piano";
     const sff = (n, m) => songFromFile(n, m ? strict(m) : genStyle);
     const anyDeep = meta.some(m => m.keep.length >= 2);
     const rootName = meta[0].dirs[0] || "";
@@ -174,7 +175,7 @@ export function openLote(ctx) {
     S.groups = []; S.items = [];
     const gByName = {};
     for (const m of meta) {
-      const fmt = m.fmtHint || S.fmt;
+      const fmt = fmtOf(m);
       const k = fmt + "|" + C.slug(m.song);
       if (!gByName[k]) {
         const ex = findSong(m.song, fmt);
@@ -262,8 +263,8 @@ export function openLote(ctx) {
         <div class="card"><p class="small" style="margin:0">Escolha a pasta com as músicas. Pode ser a pasta de uma música só ou uma pasta com várias músicas dentro. O app reconhece sozinho:</p>
           <ul class="small muted" style="margin:0;padding-left:18px"><li>a música, pelo nome da pasta (ou do arquivo, se estiverem soltos);</li><li>o tom, pelo nome do arquivo (ex.: <b>Andança D.mp4</b>, <b>Andança G Piano.pdf</b>);</li><li>vídeo (MP4), letra (PDF com "letra" no nome) e partituras (os outros PDFs).</li></ul>
           <p class="small muted" style="margin:0">Áudios e vídeos ainda em 1080p ficam de fora. Antes de enviar, você confere tudo.</p></div>
-        <div class="card"><b class="small">Formação das músicas novas</b><div class="tabs" role="radiogroup">${fmtBtns(S.fmt, "data-fmt")}</div>
-          <p class="small muted" style="margin:0">Se a pasta tiver "Piano" ou "Trio" no caminho, o app usa isso.</p></div>
+        <div class="card"><b class="small">Todas as músicas desta pasta são</b><div class="tabs" role="radiogroup">${fmtBtns(S.fmt, "data-fmt")}<button type="button" role="radio" aria-selected="${S.fmt === "auto"}" data-fmt="auto">Misturadas</button></div>
+          <p class="small muted" style="margin:0">${S.fmt === "auto" ? "Misturadas: o app decide por PP/TP ou Piano/Trio no nome do arquivo ou da pasta (sem nada, vira Trio)." : "Todas entram como " + (S.fmt === "piano" ? "Piano" : "Trio") + ", seja qual for o nome dos arquivos."}</p></div>
         <div id="ldrop" class="card" style="border-style:dashed;align-items:center;text-align:center;padding:28px 16px">
           ${canDir ? `<label class="btn primary" style="cursor:pointer">Escolher pasta<input id="ldir" type="file" webkitdirectory multiple hidden></label>` : ""}
           <label class="btn ${canDir ? "" : "primary"}" style="cursor:pointer">Escolher arquivos<input id="lfiles" type="file" multiple hidden accept="video/mp4,application/pdf,image/*"></label>
@@ -279,6 +280,7 @@ export function openLote(ctx) {
       box.innerHTML = `<div class="hrow spread"><h1 class="title">Conferir antes de enviar</h1><button class="btn sm" data-l="close">Fechar</button></div>
         <div class="card"><b>${ready.length} de ${S.groups.length} ${S.groups.length === 1 ? "música pronta" : "músicas prontas"}  ·  ${nFiles.length} ${nFiles.length === 1 ? "arquivo" : "arquivos"}  ·  ${C.mb(size)}</b>
           <p class="small muted" style="margin:0">${skipped ? skipped + " arquivo" + (skipped > 1 ? "s ficam" : " fica") + " de fora (estão marcados como Ignorar, com o motivo). " : ""}Você pode mudar o nome, a formação, o tipo e o tom de qualquer arquivo. As músicas com aviso não são enviadas até resolver.</p>
+          <div class="hrow small muted" style="flex-wrap:wrap;gap:6px">Mudar todas para: <button class="btn sm" data-l="allfmt" data-v="trio">Trio</button><button class="btn sm" data-l="allfmt" data-v="piano">Piano</button></div>
           <button class="btn primary" data-l="send" ${ready.length ? "" : "disabled"}>Enviar ${ready.length === 1 ? "1 música" : ready.length + " músicas"}</button>
           <button class="link" data-l="restart">Escolher outra pasta</button></div>
         ${S.groups.map(g => groupCard(g, fmtBtns)).join("")}`;
@@ -374,6 +376,7 @@ export function openLote(ctx) {
     if (b.dataset.l === "close") close();
     else if (b.dataset.l === "restart") { S.step = "pick"; S.items = []; S.groups = []; render(); }
     else if (b.dataset.l === "send") send();
+    else if (b.dataset.l === "allfmt") { S.fmt = b.dataset.v; S.groups.forEach(g => { g.fmt = b.dataset.v; }); applyExisting(); render(); }
     else if (b.dataset.l === "open") { close(); C.openSong && C.openSong(b.dataset.id); }
     else if (b.dataset.l === "recent") { close(); C.openRecent && C.openRecent(); }
     else if (b.dataset.l === "first") { const g = group(b.dataset.g); g.order = [b.dataset.t, ...g.order.filter(t => t !== b.dataset.t)]; render(); }
