@@ -12,7 +12,7 @@
 const CAT = new Set(["video", "videos", "partitura", "partituras", "letra", "letras", "audio", "audios", "mp4", "pdf", "pdfs",
   "720p", "720", "1080p", "1080", "clube app", "app", "convertido", "convertidos", "convertida", "convertidas", "handbrake",
   "karaoke", "karaokes", "wav", "mp3", "arquivos", "arquivo", "playback", "playbacks", "trio", "piano", "trio playback",
-  "piano playback", "clube playback", "pp", "tp", "fem", "feminina", "feminino", "masc", "masculina", "masculino", "inter", "intermediaria", "intermediario", "lyric", "lyrics", "lyric video", "lyric videos", "finais", "final", "export", "exportados", "novos", "novas"]);
+  "piano playback", "clube playback", "pp", "tp", "fem", "feminina", "feminino", "masc", "masculina", "masculino", "inter", "intermediaria", "intermediario", "lyric", "lyrics", "lyric video", "lyric videos", "exportados"]); // sem "final", "novos" etc.: podem fazer parte do nome ("Final feliz")
 const VIDEO_EXT = ["mp4", "m4v", "mov"], DOC_EXT = ["pdf", "jpg", "jpeg", "png", "webp"], AUDIO_EXT = ["mp3", "wav", "aif", "aiff", "m4a", "flac", "aac", "ogg"];
 const TONE = /^([A-G])(#|b|♯|♭)?(m)?$/;
 const SPLIT = /[\s_\-.()[\],+&]+/;
@@ -98,7 +98,7 @@ function songFromFile(name, noTone) {
   let toks = base.split(/[\s_()[\]]+/).filter(t => t && !/^[-–,.+&]+$/.test(t));
   if (tone) { const i = toks.map(fixTone).lastIndexOf(tone); if (i >= 0) toks.splice(i, 1); }
   if (toks.length > 1 && /^\d{1,3}$/.test(toks[0])) toks.shift();
-  toks = toks.filter(t => !isCat(t) && !/^(\d{3,4}p\d*|hd|fast|rf\d+|final|v\d+|tom)$/i.test(t));
+  toks = toks.filter(t => !isCat(t) && !/^(\d{3,4}p\d*|hd|fast|rf\d+|v\d+|tom)$/i.test(t));
   return cleanSong(toks.join(" ").replace(/\s*[-–]\s*$/, "").replace(/^\s*[-–]\s*/, ""));
 }
 // nome do botão da partitura: o nome do arquivo sem a música, sem o tom e sem "partitura"
