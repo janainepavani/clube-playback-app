@@ -24,7 +24,18 @@ const extOf = n => (n.split(".").pop() || "").toLowerCase();
 const baseOf = n => n.replace(/\.[^.]+$/, "");
 const isCat = s => CAT.has(C.norm(s).replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim());
 const fixTone = t => t.replace("♯", "#").replace("♭", "b");
+// Piano Playback: "F-E" = Feminina em E, "I-G" = Intermediária em G, "M-C" = Masculina em C
+const GEN = /(^|[\s_(])([FIM])\s*[-–_]\s*([A-G](?:#|b|♯|♭)?m?)(?=$|[\s_\-.)])/g;
+const GEN_RANK = { F: 0, I: 1, M: 2 };
+function genIn(s) {
+  let m, last = null; GEN.lastIndex = 0;
+  while ((m = GEN.exec(String(s || "")))) last = m;
+  if (!last) return null;
+  const str = String(s); const at = last.index + last[1].length;
+  return { g: last[2], tone: fixTone(last[3]), rest: (str.slice(0, at) + " " + str.slice(at + last[0].length - last[1].length)).replace(/\s+/g, " ").trim() };
+}
 function toneIn(s) {
+  const gm = genIn(s); if (gm) return gm.tone;
   const toks = String(s || "").split(SPLIT).filter(Boolean);
   for (let i = toks.length - 1; i >= 0; i--) { const t = fixTone(toks[i]); if (TONE.test(t)) return t; }
   // "Tom D", "tom-Bb" já caem acima; "D.mp4" também
@@ -38,9 +49,11 @@ function cleanSong(s) {
   }).replace(/[_]+/g, " ").replace(/\s+/g, " ").trim();
 }
 // nome da música a partir do nome do arquivo: tira o tom, as palavras de categoria e marcas de conversão
-function songFromFile(name) {
-  const tone = toneIn(baseOf(name));
-  let toks = baseOf(name).split(/[\s_()[\]]+/).filter(t => t && !/^[-–,.+&]+$/.test(t));
+// noTone: não procura tom solto (arquivo de letra, ou pasta no padrão F-/I-/M- do Piano)
+function songFromFile(name, noTone) {
+  const gm = genIn(baseOf(name)); const base = gm ? gm.rest : baseOf(name);
+  const tone = gm || noTone || /letra/.test(C.norm(name)) ? "" : toneIn(base);
+  let toks = base.split(/[\s_()[\]]+/).filter(t => t && !/^[-–,.+&]+$/.test(t));
   if (tone) { const i = toks.map(fixTone).lastIndexOf(tone); if (i >= 0) toks.splice(i, 1); }
   if (toks.length > 1 && /^\d{1,3}$/.test(toks[0])) toks.shift();
   toks = toks.filter(t => !isCat(t) && !/^(\d{3,4}p\d*|hd|fast|rf\d+|final|v\d+|tom)$/i.test(t));
@@ -48,7 +61,7 @@ function songFromFile(name) {
 }
 // nome do botão da partitura: o nome do arquivo sem a música, sem o tom e sem "partitura"
 function sheetLabel(name, song) {
-  let s = baseOf(name); const tone = toneIn(s);
+  const gm = genIn(baseOf(name)); let s = gm ? gm.rest : baseOf(name); const tone = gm ? "" : toneIn(s);
   const ns = C.norm(song);
   let toks = s.split(/[\s_()[\]]+/).filter(t => t && !/^[-–,.+&]+$/.test(t));
   if (toks.length > 1 && /^\d{1,3}$/.test(toks[0])) toks.shift();
@@ -109,19 +122,21 @@ export function openLote(ctx) {
       const fmtHint = dirs.some(d => /piano/i.test(d)) ? "piano" : dirs.some(d => /trio/i.test(d)) ? "trio" : "";
       return { ...x, dirs, keep, fmtHint };
     });
+    const genStyle = meta.some(m => genIn(baseOf(m.file.name)));
+    const sff = n => songFromFile(n, genStyle);
     const anyDeep = meta.some(m => m.keep.length >= 2);
     const rootName = meta[0].dirs[0] || "";
     const rootIsSong = rootName && !isCat(rootName);
     const loose = meta.filter(m => !(anyDeep ? m.keep.length >= 2 : false));
     // arquivos soltos: usar a pasta como nome se os vídeos não mostrarem nomes diferentes
-    const looseVideoNames = new Set(loose.filter(m => VIDEO_EXT.includes(extOf(m.file.name))).map(m => C.slug(songFromFile(m.file.name))).filter(Boolean));
+    const looseVideoNames = new Set(loose.filter(m => VIDEO_EXT.includes(extOf(m.file.name))).map(m => C.slug(sff(m.file.name))).filter(Boolean));
     const looseUseRoot = rootIsSong && !anyDeep && looseVideoNames.size <= 1;
     for (const m of meta) {
       let song = "";
       if (anyDeep && m.keep.length >= 2) song = (rootIsSong && m.keep[0] === rootName) ? m.keep[1] : m.keep[0];
       else if (looseUseRoot) song = rootName;
       else if (anyDeep && m.keep.length === 1 && m.keep[0] !== rootName) song = m.keep[0];
-      if (!song) { song = songFromFile(m.file.name); m.fromFile = true; }
+      if (!song) { song = sff(m.file.name); m.fromFile = true; }
       m.song = cleanSong(song) || "Sem nome";
     }
     // partitura/letra solta com nome mais comprido ("Andança Baixo") vai para a música do vídeo ("Andança")
@@ -143,7 +158,8 @@ export function openLote(ctx) {
       }
       const ext = extOf(m.file.name);
       // tom: no arquivo; se não tiver, na subpasta mais próxima
-      let tone = toneIn(baseOf(m.file.name)); if (!tone) for (let i = m.dirs.length - 1; i >= 0 && !tone; i--) tone = (m.dirs[i].split(SPLIT).length <= 3) ? toneIn(m.dirs[i]) : "";
+      const gmf = genIn(baseOf(m.file.name));
+      let tone = gmf ? gmf.tone : genStyle || /letra/.test(C.norm(m.file.name)) ? "" : toneIn(baseOf(m.file.name)); if (!tone && !genStyle) for (let i = m.dirs.length - 1; i >= 0 && !tone; i--) tone = (m.dirs[i].split(SPLIT).length <= 3) ? toneIn(m.dirs[i]) : "";
       let type = "skip", note = "";
       if (VIDEO_EXT.includes(ext)) type = "video";
       else if (DOC_EXT.includes(ext)) type = /letra/.test(C.norm(m.file.name)) ? "letra" : "sheet";
@@ -151,7 +167,7 @@ export function openLote(ctx) {
       else note = "tipo de arquivo que o app não usa";
       if (ext === "mov" || ext === "m4v") note = "converta para MP4 antes";
       if (type === "sheet" && !tone) note = "escolha o tom";
-      S.items.push({ id: "f" + S.items.length, file: m.file, rel: m.rel, gid: gByName[k].gid, type: (ext === "mov" || ext === "m4v") ? "skip" : type, tone, label: type === "sheet" ? sheetLabel(m.file.name, m.song) : "", note, h: 0 });
+      S.items.push({ id: "f" + S.items.length, file: m.file, rel: m.rel, gid: gByName[k].gid, type: (ext === "mov" || ext === "m4v") ? "skip" : type, tone, g: (genIn(baseOf(m.file.name)) || {}).g || "", label: type === "sheet" ? sheetLabel(m.file.name, m.song) : "", note, h: 0 });
     }
     // 3) altura dos vídeos (para separar o original grande do convertido)
     const vids = S.items.filter(i => VIDEO_EXT.includes(extOf(i.file.name)));
@@ -187,7 +203,7 @@ export function openLote(ctx) {
       // ordem dos tons: começa pela ordem do catálogo, depois a dos arquivos
       const tones = [];
       (ex ? ex.keys.map(k => k.key) : []).forEach(t => tones.includes(t) || tones.push(t));
-      S.items.filter(i => i.gid === g.gid && i.type !== "skip" && i.type !== "letra" && i.tone).sort((a, b) => a.file.name.localeCompare(b.file.name)).forEach(i => {
+      S.items.filter(i => i.gid === g.gid && i.type !== "skip" && i.type !== "letra" && i.tone).sort((a, b) => (GEN_RANK[a.g] ?? 9) - (GEN_RANK[b.g] ?? 9) || a.file.name.localeCompare(b.file.name)).forEach(i => {
         const same = tones.find(t => C.norm(t) === C.norm(i.tone)); if (same) i.tone = same; else tones.push(i.tone);
       });
       g.order = g.order.filter(t => tones.includes(t)).concat(tones.filter(t => !g.order.includes(t)));
