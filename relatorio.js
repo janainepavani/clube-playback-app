@@ -136,6 +136,16 @@ export function openRelatorio(ctx) {
     catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
     S.busy = ""; render();
   }
+  // BPM que o acervo já conhece, para as músicas do app que ainda não têm
+  const bpmPlan = () => build().filter(r => r.inApp && !r.bpm && r.bpmSug);
+  async function bpmFill() {
+    const plan = bpmPlan(); if (!plan.length) return;
+    if (!confirm("Preencher o BPM destas músicas?\n\n" + plan.map(r => r.name + " (" + (r.fmt === "trio" ? "Trio" : "Piano") + "): " + r.bpmSug).join("\n"))) return;
+    S.busy = "Preenchendo os BPMs..."; render();
+    try { for (const r of plan) { await C.saveBpm(r.id, r.bpmSug); const x = songNow(r.id); if (x) x.bpm = r.bpmSug; } C.toast("BPM preenchido em " + plan.length + (plan.length > 1 ? " músicas." : " música.")); }
+    catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
+    S.busy = ""; render();
+  }
   async function autoFix() {
     const list = wrongs().map(x => ({ x, sg: suggest(x) })).filter(o => o.sg && !o.sg.cross);
     if (!list.length) return C.toast("Não achei nenhuma para juntar sozinha. Use Juntar em cada uma.");
@@ -166,6 +176,8 @@ export function openRelatorio(ctx) {
         <p class="small muted" style="margin:0">Completa = todos os tons com vídeo, letra, BPM e, no Trio, duas partituras em cada tom: a sheet music e a da melodia (a da melodia precisa ter "melodia" no nome). No Piano a partitura não é cobrada.</p>
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
       ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
+      ${(() => { const n = bpmPlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>Já sei o BPM de ${n} ${n > 1 ? "músicas que estão" : "música que está"} sem BPM no app</b>
+        <button class="btn primary" data-r="bpmfill">Preencher ${n > 1 ? "os " + n + " BPMs" : "o BPM"}</button></div>` : ""; })()}
       ${(() => { const n = genPlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>${n} ${n > 1 ? "músicas do Piano estão" : "música do Piano está"} com tom sem F-, I- ou M-</b>
         <p class="small muted" style="margin:0">Pela lista do acervo eu sei qual tom é o feminino, o intermediário e o masculino. Confere a lista e eu arrumo.</p>
         <button class="btn primary" data-r="genfix">Colocar F-, I- e M- nos tons</button></div>` : ""; })()}
@@ -216,6 +228,7 @@ export function openRelatorio(ctx) {
     else if (b.dataset.r === "new") { const st = { fmt: S.fmt, sit: S.sit, q: S.q, y: root.scrollTop }; close(); C.newSong(b.dataset.n, b.dataset.f, b.dataset.t ? b.dataset.t.split("/") : [], b.dataset.b, st); }
     else if (b.dataset.r === "autofix") autoFix();
     else if (b.dataset.r === "genfix") genFix();
+    else if (b.dataset.r === "bpmfill") bpmFill();
     else if (b.dataset.r === "addnew") {
       const x = songNow(b.dataset.id); if (!x) return;
       const fmt = x.formacao === "piano" ? "piano" : "trio";
