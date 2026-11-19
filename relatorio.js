@@ -23,8 +23,9 @@ const GRANK = { F: 0, I: 1, M: 2 };
 // "Acaso FEM PP" -> { base: "Acaso", g: "F", fmt: "piano" }; "Acaso F" -> { base: "Acaso", g: "F" }
 const BPM_RE = /(?:^|[\s_|\-(\[])(?:(\d{2,3})\s*bpm|bpm\s*[:=]?\s*(\d{2,3}))(?=$|[\s_|\-)\].])/i;
 function parseWrong(name) {
-  const bm = String(name || "").match(BPM_RE); const bpm = bm ? (bm[1] || bm[2]) : "";
-  name = String(name || "").replace(new RegExp(BPM_RE.source, "gi"), " ").replace(/\s*\|\s*/g, " ");
+  const bm = String(name || "").match(BPM_RE); const pm = String(name || "").match(/\|\s*(\d{2,3})\s*(?=\||$)/);
+  const bpm = bm ? (bm[1] || bm[2]) : pm ? pm[1] : "";
+  name = String(name || "").replace(new RegExp(BPM_RE.source, "gi"), " ").replace(/\|\s*\d{2,3}\s*(?=\||$)/g, " ").replace(/\s*\|\s*/g, " ");
   let toks = String(name || "").split(/[\s_\-]+/).filter(Boolean), g = "", fmt = "";
   toks = toks.filter((t, i) => {
     const n = C.norm(t);
@@ -265,6 +266,7 @@ export function openRelatorio(ctx) {
         ${r.soApp ? (() => { const sg = suggest(songNow(r.id) || { name: r.name }); return `<div class="stack" style="flex:1 1 100%;gap:8px;padding:10px;border:1px solid var(--warn);border-radius:10px">
           ${sg && sg.cross ? `<b class="small">"${C.esc(sg.name)}" está no acervo do ${sg.fmt === "trio" ? "Trio" : "Piano"}, e aqui ela está como ${sg.own === "trio" ? "Trio" : "Piano"}. É a versão ${sg.own === "trio" ? "Trio" : "Piano"} dessa música?</b>`
             : sg ? `<b class="small">Parece ser "${C.esc(sg.name)}" (${sg.fmt === "trio" ? "Trio" : "Piano"}) com o nome errado. Ou é uma música nova?</b>` : `<b class="small">Essa música não está na minha lista do acervo. É uma música nova?</b>`}
+          ${(() => { const pw = parseWrong(r.name); const base = pw.base ? pw.base.charAt(0).toLocaleUpperCase("pt-BR") + pw.base.slice(1) : r.name; return `<label class="small muted" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">Nome certo <input class="field" style="flex:1;min-width:180px;padding:6px 8px" data-nm="${r.id}" value="${C.esc(base)}"></label>${pw.bpm ? `<span class="small muted">BPM ${C.esc(pw.bpm)} (achei no nome)</span>` : ""}`; })()}
           <div class="hrow" style="flex-wrap:wrap;gap:6px"><button class="btn sm ${sg && !sg.cross ? "" : "primary"}" data-r="addnew" data-id="${r.id}">${sg && sg.cross ? `Sim, é a versão ${sg.own === "trio" ? "Trio" : "Piano"}: incluir no acervo do ${sg.own === "trio" ? "Trio" : "Piano"}` : "Sim, é nova: incluir no acervo"}</button><button class="btn sm danger" data-r="del" data-id="${r.id}">Apagar</button></div>
           <div class="hrow" style="flex-wrap:wrap;gap:6px"><input class="field" style="flex:1;min-width:180px;padding:6px 8px" list="acv" data-fix="${r.id}" placeholder="Não, é esta música do acervo..." value="${sg ? C.esc(sg.name + " (" + (sg.fmt === "trio" ? "Trio" : "Piano") + ")") : ""}"><button class="btn sm ${sg && !sg.cross ? "primary" : ""}" data-r="join" data-id="${r.id}">Juntar</button></div></div>`; })() : ""}
         ${r.inApp ? `<button class="btn sm primary" data-r="open" data-id="${r.id}">Abrir</button>` : `<button class="btn sm" data-r="new" data-n="${C.esc(r.name)}" data-f="${r.fmt}" data-t="${C.esc(r.tons.join("/"))}" data-b="${C.esc(r.bpmSug)}">Cadastrar</button>`}
@@ -303,8 +305,12 @@ export function openRelatorio(ctx) {
     else if (b.dataset.r === "addnew") {
       const x = songNow(b.dataset.id); if (!x) return;
       const fmt = x.formacao === "piano" ? "piano" : "trio";
-      const item = { name: x.name, fmt, tons: (x.keys || []).map(k => String(k.key).replace(/^[FIM]-/, "")).join("/"), bpm: x.bpm || "" };
-      (async () => { try { EXTRA = EXTRA.filter(e => !(e.fmt === fmt && matchKey(e.name) === matchKey(x.name))).concat([item]); await C.saveExtras(EXTRA); C.toast("Incluí " + x.name + " no acervo do " + (fmt === "trio" ? "Trio" : "Piano") + "."); } catch (e) { console.warn(e); C.toast("Não consegui incluir: " + (e.code || e.message)); } render(); })();
+      const nm = ((box.querySelector(`[data-nm="${b.dataset.id}"]`) || {}).value || x.name).trim().replace(/\s+/g, " ");
+      const bpm = x.bpm || parseWrong(x.name).bpm || "";
+      const item = { name: nm, fmt, tons: (x.keys || []).map(k => String(k.key).replace(/^[FIM]-/, "")).join("/"), bpm };
+      (async () => { try {
+        if (nm !== x.name || bpm !== (x.bpm || "")) { const d = { name: nm, formacao: fmt, bpm: bpm || null, letra: x.letra || null, keys: (x.keys || []).map(k => ({ key: k.key, video: k.video, sheets: C.sheetsOf(k) })) }; await C.saveSong(x.id, d); local[x.id] = { id: x.id, ...d }; }
+        EXTRA = EXTRA.filter(e => !(e.fmt === fmt && (matchKey(e.name) === matchKey(x.name) || matchKey(e.name) === matchKey(nm)))).concat([item]); await C.saveExtras(EXTRA); C.toast("Incluí " + nm + " no acervo do " + (fmt === "trio" ? "Trio" : "Piano") + "."); } catch (e) { console.warn(e); C.toast("Não consegui incluir: " + (e.code || e.message)); } render(); })();
     }
     else if (b.dataset.r === "join") {
       const v = (box.querySelector(`[data-fix="${b.dataset.id}"]`) || {}).value || ""; const m = v.match(/^(.*?)\s*\((Trio|Piano)\)\s*$/);

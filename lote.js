@@ -80,8 +80,10 @@ function toneIn(s) {
 // tira número na frente ("01 - "), tons entre parênteses no fim ("(D/G)") e espaços extras
 // BPM no nome ("70bpm", "| 70 BPM |", "BPM 70"): sai do nome e vira o BPM da música
 const BPM_RE = /(?:^|[\s_|\-(\[])(?:(\d{2,3})\s*bpm|bpm\s*[:=]?\s*(\d{2,3}))(?=$|[\s_|\-)\].])/i;
-function bpmIn(s) { const m = String(s || "").match(BPM_RE); return m ? (m[1] || m[2]) : ""; }
-function stripBpm(s) { return String(s || "").replace(new RegExp(BPM_RE.source, "gi"), " ").replace(/\s*\|\s*/g, " ").replace(/[\s\-–_]+$/, "").replace(/^[\s\-–_]+/, "").replace(/\s+/g, " ").trim(); }
+// número sozinho entre barras ("Estrada de sol | | 124 |") também é BPM
+const PIPE_BPM = /\|\s*(\d{2,3})\s*(?=\||$)/;
+function bpmIn(s) { const m = String(s || "").match(BPM_RE); if (m) return m[1] || m[2]; const p = String(s || "").match(PIPE_BPM); return p ? p[1] : ""; }
+function stripBpm(s) { return String(s || "").replace(new RegExp(BPM_RE.source, "gi"), " ").replace(new RegExp(PIPE_BPM.source, "g"), " ").replace(/\s*\|\s*/g, " ").replace(/[\s\-–_]+$/, "").replace(/^[\s\-–_]+/, "").replace(/\s+/g, " ").trim(); }
 function cleanSong(s) {
   return stripBpm(s).replace(/^\s*\d+\s*[-_.)]\s*/, "").replace(/\s*[([][^)\]]*[)\]]\s*$/, m => {
     const inner = m.replace(/[()[\]]/g, "").split(/[\s/\-,e]+/).filter(Boolean);

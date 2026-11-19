@@ -1128,5 +1128,19 @@ document.addEventListener("input", e => {
   if (e.target.id === "q") { S.query = e.target.value; const pos = e.target.selectionStart; render(); const q = $("q"); if (q) { q.focus(); try { q.setSelectionRange(pos, pos); } catch (_) {} } }
 });
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator) {
+  const hadSW = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register("sw.js").then(reg => {
+    // procura versão nova sempre que o app volta para a tela
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
+  }).catch(() => {});
+  // versão nova instalada: recarrega sozinho, menos no meio de um envio de pasta ou de uma gravação
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadSW) return;
+    // não recarrega com apresentação aberta, vídeo tocando, gravação/envio/relatório abertos ou ficha de música em edição
+    const busy = () => presOpen || adminForm || document.querySelector(".st, .lote") || [...document.querySelectorAll("video")].some(v => !v.paused);
+    const go = () => { if (!busy()) location.reload(); else setTimeout(go, 5000); };
+    go();
+  });
+}
 render();
