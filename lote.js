@@ -21,6 +21,15 @@ import { ACERVO_PIANO, ACERVO_TRIO } from "./acervo.js";
 // Nome da música sempre regular: se está no acervo, usa a grafia do acervo (acentos e maiúsculas certos);
 // se é nova, só a primeira letra maiúscula (mantém nomes próprios conhecidos)
 const PROPER = ["Deus", "Maria", "João", "José", "Jesus", "Rio", "Ipanema", "Brasil", "Natal", "América", "Bahia", "Minas", "Itapuã", "Santo", "Amaro", "Odeon", "Saigon", "Luiza", "Madalena", "Beatriz", "Sampa", "Copacabana", "Senhora", "Nossa", "Índio", "Branca", "Gita", "Asa", "I", "II", "Love", "You"];
+function acervoPrefix(raw, fmt) {
+  const r = C.slug(raw) + "-";
+  const lists = fmt === "piano" ? [ACERVO_PIANO, ACERVO_TRIO] : [ACERVO_TRIO, ACERVO_PIANO];
+  for (const list of lists) {
+    const hits = list.filter(a => r.startsWith(C.slug(a[0]) + "-")).sort((a, b) => C.slug(b[0]).length - C.slug(a[0]).length);
+    if (hits.length) return hits[0][0];
+  }
+  return "";
+}
 function properName(name) {
   const sl = C.slug(name);
   const hit = ACERVO_TRIO.concat(ACERVO_PIANO).find(a => C.slug(a[0]) === sl);
@@ -183,8 +192,10 @@ export function openLote(ctx) {
       if (anyDeep && m.keep.length >= 2) song = (rootIsSong && m.keep[0] === rootName) ? m.keep[1] : m.keep[0];
       else if (looseUseRoot) song = rootName;
       else if (anyDeep && m.keep.length === 1 && m.keep[0] !== rootName) song = m.keep[0];
+      const src = song || baseOf(m.file.name);
       if (!song) { song = sff(m.file.name, m); m.fromFile = true; }
-      m.song = cleanSong(song) || "Sem nome";
+      // o nome certo vem no começo: se o começo bate com uma música do acervo, usa ela (a mais comprida que bater)
+      m.song = acervoPrefix(src.replace(/^\s*\d+\s*[-_.)]\s*/, ""), fmtOf(m)) || cleanSong(song) || "Sem nome";
     }
     // partitura/letra solta com nome mais comprido ("Andança Baixo") vai para a música do vídeo ("Andança")
     const vidNames = [...new Set(meta.filter(m => m.fromFile && VIDEO_EXT.includes(extOf(m.file.name))).map(m => m.song))].concat(songsNow().map(s => s.name)).sort((a, b) => b.length - a.length);
@@ -432,4 +443,4 @@ export function openLote(ctx) {
 }
 
 // usado nos testes
-export const _test = { bpmIn, stripBpm, toneIn, songFromFile, sheetLabel, cleanSong, properName, setCtx: c => { C = c; } };
+export const _test = { acervoPrefix, bpmIn, stripBpm, toneIn, songFromFile, sheetLabel, cleanSong, properName, setCtx: c => { C = c; } };
