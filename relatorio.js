@@ -34,8 +34,11 @@ const sameKey = (a, b) => { const x = /^([FIM])-(.+)$/.exec(a) || [0, "", a], y 
 // sugestão automática: qual música do acervo é esta
 function suggest(s) {
   const p = parseWrong(s.name); const fmt = p.fmt || (s.formacao === "piano" ? "piano" : "trio");
-  const hit = acervoAll().find(a => a.fmt === fmt && matchKey(a.name) === matchKey(p.base)) || acervoAll().find(a => matchKey(a.name) === matchKey(p.base));
-  return hit ? { name: hit.name, fmt: hit.fmt, g: p.g } : null;
+  const same = acervoAll().find(a => a.fmt === fmt && matchKey(a.name) === matchKey(p.base));
+  if (same) return { name: same.name, fmt: same.fmt, g: p.g };
+  // mesma música só na outra formação: pode ser a versão Trio/Piano ainda não listada
+  const other = acervoAll().find(a => a.fmt !== fmt && matchKey(a.name) === matchKey(p.base));
+  return other ? { name: other.name, fmt: other.fmt, g: p.g, cross: true, own: fmt } : null;
 }
 
 let LOCAL = {};
@@ -100,7 +103,7 @@ export function openRelatorio(ctx) {
   }
   const wrongs = () => C.getSongs().filter(x => local[x.id] !== null && build().some(r => r.soApp && r.id === x.id));
   async function autoFix() {
-    const list = wrongs().map(x => ({ x, sg: suggest(x) })).filter(o => o.sg);
+    const list = wrongs().map(x => ({ x, sg: suggest(x) })).filter(o => o.sg && !o.sg.cross);
     if (!list.length) return C.toast("Não achei nenhuma para juntar sozinha. Use Juntar em cada uma.");
     if (!confirm("Juntar estas músicas nas certas e apagar as erradas?\n\n" + list.map(o => o.x.name + "  →  " + o.sg.name + " (" + (o.sg.fmt === "trio" ? "Trio" : "Piano") + ")").join("\n"))) return;
     S.busy = "Corrigindo..."; render();
@@ -129,7 +132,7 @@ export function openRelatorio(ctx) {
         <p class="small muted" style="margin:0">Completa = todos os tons com vídeo, letra, BPM e, no Trio, partitura em cada tom. No Piano a partitura não é cobrada.</p>
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
       ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
-      ${(() => { const w = rows.filter(r => r.soApp); if (!w.length) return ""; const auto = w.filter(r => suggest(songNow(r.id) || { name: r.name })).length;
+      ${(() => { const w = rows.filter(r => r.soApp); if (!w.length) return ""; const auto = w.filter(r => { const g = suggest(songNow(r.id) || { name: r.name }); return g && !g.cross; }).length;
         return `<div class="card" style="border-color:var(--warn)"><b>${w.length} ${w.length > 1 ? "músicas do app não estão" : "música do app não está"} na lista do acervo</b>
           <p class="small muted" style="margin:0">Em cada uma, me diga: se é música nova, toque em "Sim, é nova" e ela entra na lista. Se entrou com o nome errado, escolha a música certa e toque em Juntar (vídeos, letras e partituras passam para a certa e a errada some). Ou Apagar.</p>
           ${auto ? `<button class="btn primary" data-r="autofix">Corrigir ${auto} automaticamente</button>` : ""}
@@ -143,9 +146,10 @@ export function openRelatorio(ctx) {
           <br><span class="small muted" style="font-weight:500">Tons: ${(r.tons.length ? r.tons : r.appKeys).map(x => C.esc(x) + (r.foraTons.includes(x) ? " (falta)" : "")).join(" / ") || "não informados"}${r.inApp ? `  ·  Letra: ${r.letra ? "tem" : "falta"}${r.fmt === "trio" ? `  ·  Partitura: ${r.semPart.length ? "falta em " + r.semPart.map(C.esc).join(", ") : "tem"}` : ""}` : ""}</span>
           ${r.falta.length && r.inApp ? `<br><span class="small" style="color:var(--warn)">${C.esc(r.falta.join("; "))}</span>` : ""}</span>
         ${r.soApp ? (() => { const sg = suggest(songNow(r.id) || { name: r.name }); return `<div class="stack" style="flex:1 1 100%;gap:8px;padding:10px;border:1px solid var(--warn);border-radius:10px">
-          ${sg ? `<b class="small">Parece ser "${C.esc(sg.name)}" (${sg.fmt === "trio" ? "Trio" : "Piano"}) com o nome errado. Ou é uma música nova?</b>` : `<b class="small">Essa música não está na minha lista do acervo. É uma música nova?</b>`}
-          <div class="hrow" style="flex-wrap:wrap;gap:6px"><button class="btn sm ${sg ? "" : "primary"}" data-r="addnew" data-id="${r.id}">Sim, é nova: incluir no acervo</button><button class="btn sm danger" data-r="del" data-id="${r.id}">Apagar</button></div>
-          <div class="hrow" style="flex-wrap:wrap;gap:6px"><input class="field" style="flex:1;min-width:180px;padding:6px 8px" list="acv" data-fix="${r.id}" placeholder="Não, é esta música do acervo..." value="${sg ? C.esc(sg.name + " (" + (sg.fmt === "trio" ? "Trio" : "Piano") + ")") : ""}"><button class="btn sm ${sg ? "primary" : ""}" data-r="join" data-id="${r.id}">Juntar</button></div></div>`; })() : ""}
+          ${sg && sg.cross ? `<b class="small">"${C.esc(sg.name)}" está no acervo do ${sg.fmt === "trio" ? "Trio" : "Piano"}, e aqui ela está como ${sg.own === "trio" ? "Trio" : "Piano"}. É a versão ${sg.own === "trio" ? "Trio" : "Piano"} dessa música?</b>`
+            : sg ? `<b class="small">Parece ser "${C.esc(sg.name)}" (${sg.fmt === "trio" ? "Trio" : "Piano"}) com o nome errado. Ou é uma música nova?</b>` : `<b class="small">Essa música não está na minha lista do acervo. É uma música nova?</b>`}
+          <div class="hrow" style="flex-wrap:wrap;gap:6px"><button class="btn sm ${sg && !sg.cross ? "" : "primary"}" data-r="addnew" data-id="${r.id}">${sg && sg.cross ? `Sim, é a versão ${sg.own === "trio" ? "Trio" : "Piano"}: incluir no acervo do ${sg.own === "trio" ? "Trio" : "Piano"}` : "Sim, é nova: incluir no acervo"}</button><button class="btn sm danger" data-r="del" data-id="${r.id}">Apagar</button></div>
+          <div class="hrow" style="flex-wrap:wrap;gap:6px"><input class="field" style="flex:1;min-width:180px;padding:6px 8px" list="acv" data-fix="${r.id}" placeholder="Não, é esta música do acervo..." value="${sg ? C.esc(sg.name + " (" + (sg.fmt === "trio" ? "Trio" : "Piano") + ")") : ""}"><button class="btn sm ${sg && !sg.cross ? "primary" : ""}" data-r="join" data-id="${r.id}">Juntar</button></div></div>`; })() : ""}
         ${r.inApp ? `<button class="btn sm primary" data-r="open" data-id="${r.id}">Abrir</button>` : `<button class="btn sm" data-r="new" data-n="${C.esc(r.name)}" data-f="${r.fmt}" data-t="${C.esc(r.tons.join("/"))}" data-b="${C.esc(r.bpmSug)}">Cadastrar</button>`}
         ${r.inApp ? `<label class="small muted" style="display:flex;align-items:center;gap:6px">BPM <input class="field" style="width:80px;padding:6px 8px" inputmode="numeric" data-bpm="${r.id}" value="${C.esc(r.bpm)}" placeholder="${C.esc(r.bpmSug)}"></label>${!r.bpm && r.bpmSug ? `<button class="btn sm ghost" data-r="usebpm" data-id="${r.id}" data-v="${C.esc(r.bpmSug)}">Usar ${C.esc(r.bpmSug)}</button>` : ""}` : ""}
       </div>`).join("") || `<p class="muted">Nenhuma música aqui.</p>`}</div>`;
