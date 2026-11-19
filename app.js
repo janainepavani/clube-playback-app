@@ -662,7 +662,7 @@ function viewSupport() {
 function viewAdmThread() {
   if (!S.isAdmin || !S.thread) { S.view = "admin"; return viewAdmin(); }
   watchMsgs(S.thread);
-  const t = S.sup.threads.find(x => x.uid === S.thread) || {};
+  const t = S.sup.threads.find(x => x.uid === S.thread) || { email: ((S.adminData && S.adminData.active || []).find(u => u.uid === S.thread) || {}).email || "" };
   return `<button class="link" data-a="nav" data-v="admin">Voltar ao painel</button>
   <div class="stack" style="margin-top:12px">
     <h1 class="title" style="font-size:22px;overflow-wrap:anywhere">${esc(t.email || "Conversa")}</h1>
@@ -696,6 +696,22 @@ async function shrinkImage(file) {
     return await new Promise(r => c.toBlob(b => r(b || file), "image/jpeg", 0.85));
   } catch (e) { return file; }
 }
+// Aviso para todas as assinantes ativas: vira uma mensagem no "Fale com a Janaine" de cada uma + e-mail
+async function sendBroadcast() {
+  const text = (($("bcText") && $("bcText").value) || "").trim(); if (!text) return toast("Escreva o aviso.");
+  const list = ((S.adminData && S.adminData.active) || []).filter(u => u.uid !== S.user.uid && u.email);
+  if (!list.length) return toast("Nenhuma assinante ativa.");
+  if (!confirm("Mandar este aviso para " + list.length + " assinantes?")) return;
+  S.bcSending = true; render(); let ok = 0;
+  for (const u of list) {
+    try {
+      await addDoc(collection(db, "support", u.uid, "msgs"), { from: "admin", text, img: null, at: serverTimestamp(), aviso: true });
+      await setDoc(doc(db, "support", u.uid), { email: u.email.toLowerCase(), lastAt: serverTimestamp(), lastFrom: "admin", lastText: text.slice(0, 140), unreadUser: true, unreadAdmin: false }, { merge: true });
+      sendWelcome(u.email, { tipo: "resposta" }); ok++;
+    } catch (e) { console.warn(e); }
+  }
+  S.bcSending = false; S.bcOpen = false; render(); toast("Aviso enviado para " + ok + " de " + list.length + " assinantes.");
+}
 async function sendSupport() {
   if (supSending) return;
   const uid = S.isAdmin ? S.thread : S.user.uid; if (!uid) return;
@@ -712,8 +728,10 @@ async function sendSupport() {
     await addDoc(collection(db, "support", uid, "msgs"), { from: S.isAdmin ? "admin" : "user", text, img, at: serverTimestamp() });
     const last = text ? text.slice(0, 140) : "Print";
     if (S.isAdmin) {
-      await setDoc(doc(db, "support", uid), { lastAt: serverTimestamp(), lastFrom: "admin", lastText: last, unreadUser: true, unreadAdmin: false }, { merge: true });
-      const t = S.sup.threads.find(x => x.uid === uid); if (t && t.email) sendWelcome(t.email, { tipo: "resposta" });
+      // conversa nova começada pela Janaine: pega o e-mail da lista de assinantes ativas
+      const t = S.sup.threads.find(x => x.uid === uid); const em = (t && t.email) || ((S.adminData && S.adminData.active || []).find(u => u.uid === uid) || {}).email || "";
+      await setDoc(doc(db, "support", uid), { ...(em ? { email: em.toLowerCase() } : {}), lastAt: serverTimestamp(), lastFrom: "admin", lastText: last, unreadUser: true, unreadAdmin: false }, { merge: true });
+      if (em) sendWelcome(em, { tipo: "resposta" });
     } else {
       await setDoc(doc(db, "support", uid), { email: (S.user.email || "").toLowerCase(), lastAt: serverTimestamp(), lastFrom: "user", lastText: last, unreadAdmin: true, unreadUser: false }, { merge: true });
       notifyJanaine(text, !!img);
@@ -774,6 +792,13 @@ function viewAdmin() {
     <div class="hrow spread"><h1 class="title">Painel da Janaine</h1><button class="btn sm" data-a="adminreload">Atualizar</button></div>
     ${A.hasKey ? "" : `<div class="card"><b>Ative o modo offline</b><p class="small muted" style="margin:0">Cria a chave que embaralha os vídeos salvos nos aparelhos. Faça isso uma vez só.</p><button class="btn primary" data-a="mkkey">Ativar modo offline</button></div>`}
     <div class="card"><div class="hrow spread"><b>Mensagens</b><span class="pill ${S.sup.unreadAdmin ? "warn" : ""}">${S.sup.unreadAdmin ? S.sup.unreadAdmin + (S.sup.unreadAdmin === 1 ? " nova" : " novas") : S.sup.threads.length}</span></div>
+      ${S.sup.ready ? `<div class="hrow" style="flex-wrap:wrap;gap:6px">
+        <select class="field" id="newThread" style="flex:1;min-width:200px" aria-label="Escrever para"><option value="">Escrever para uma assinante...</option>${((A && A.active) || []).filter(u => u.uid !== S.user.uid).map(u => `<option value="${u.uid}">${esc(u.email)}</option>`).join("")}</select>
+        <button class="btn sm" data-a="newthread">Abrir conversa</button>
+        <button class="btn sm ${S.bcOpen ? "primary" : ""}" data-a="bctoggle">Aviso para todas</button></div>
+      ${S.bcOpen ? `<div class="stack" style="gap:8px"><textarea class="field" id="bcText" rows="4" placeholder="Ex.: Chegaram 5 músicas novas no app!"></textarea>
+        <p class="small muted" style="margin:0">Vai como mensagem no "Fale com a Janaine" de cada assinante ativa (${((A && A.active) || []).filter(u => u.uid !== S.user.uid).length}), com aviso por e-mail. Se alguém responder, a resposta chega aqui.</p>
+        <button class="btn primary" data-a="bcsend" ${S.bcSending ? "disabled" : ""}>${S.bcSending ? "Enviando..." : "Enviar aviso"}</button></div>` : ""}` : ""}
       ${!S.sup.ready ? `<p class="small muted" style="margin:0">Ainda desligado. Cole as regras novas do Firestore e do Storage no console do Firebase. Depois disso, o quadro Fale com a Janaine aparece para as assinantes sozinho.</p>` : S.sup.threads.length ? `<div class="list">${S.sup.threads.map(t => `<button class="row" data-a="openthread" data-uid="${t.uid}" ${t.unreadAdmin ? 'style="border-color:var(--warn)"' : ""}><span class="name">${esc(t.email)}<br><span class="small muted" style="font-weight:500">${t.lastFrom === "admin" ? "Você: " : ""}${esc(t.lastText || "")}</span></span><span class="meta">${t.unreadAdmin ? `<span class="pill warn">nova</span>` : ""}<span class="small muted">${t.lastAt ? fmtWhen(tsMs(t.lastAt)) : ""}</span></span></button>`).join("")}</div>` : `<p class="small muted" style="margin:0">Nenhuma mensagem ainda.</p>`}
     </div>
     <div class="card"><div class="hrow spread"><b>Pedidos de acesso</b><span class="pill ${A.pending.length ? "warn" : ""}">${A.pending.length}</span></div>
@@ -1000,6 +1025,9 @@ document.addEventListener("click", async e => {
     else if (a === "open") { S.songId = el.dataset.id; S.view = "song"; S.tab = "video"; S.sheetIdx = 0; S.showKeys = false; S.addTo = false; mountedKey = null; render(); window.scrollTo(0, 0); }
     else if (a === "tab") { S.tab = el.dataset.t; render(); }
     else if (a === "showkeys") { S.showKeys = !S.showKeys; render(); }
+    else if (a === "newthread") { const uid = $("newThread") && $("newThread").value; if (!uid) return toast("Escolha a assinante."); S.thread = uid; S.view = "admthread"; S.supDraft = ""; supFile = null; render(); window.scrollTo(0, 0); }
+    else if (a === "bctoggle") { S.bcOpen = !S.bcOpen; render(); }
+    else if (a === "bcsend") sendBroadcast();
     else if (a === "setvoz") { const v = el.dataset.v; S.profile.prefKeys = { ...(S.profile.prefKeys || {}), _voz: v }; mountedKey = null; render(); updateDoc(doc(db, "users", S.user.uid), { prefKeys: S.profile.prefKeys }).catch(() => {}); toast("As músicas do Piano vão abrir na tonalidade " + VOZ_NOME[v].toLowerCase() + "."); }
     else if (a === "vozdepois") { try { localStorage.setItem("cp-voz-depois", "1"); } catch (e) {} render(); }
     else if (a === "setkey") { const k = el.dataset.k; S.profile.prefKeys = { ...(S.profile.prefKeys || {}), [S.songId]: k }; S.showKeys = false; mountedKey = null; render(); updateDoc(doc(db, "users", S.user.uid), { prefKeys: S.profile.prefKeys }).catch(() => {}); toast("Tom " + k + " fixado para esta música."); }
