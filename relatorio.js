@@ -9,8 +9,34 @@ const TONE = /([A-G])(#|b|♯|♭)?(m)?(?![a-z])/;
 const toneKey = s => { s = String(s || "").replace(/^\s*[FIM]\s*-\s*/, ""); const m = String(s || "").match(TONE); return m ? (m[1] + (m[2] || "").replace("♯", "#").replace("♭", "b") + (m[3] || "")) : C.norm(s); };
 const matchKey = s => C.slug(s).replace(/(^|-)ii($|-)/g, "$12$2").replace(/(^|-)(o|a|os|as)(-|$)/g, "$1$3").replace(/-+/g, "-").replace(/^-|-$/g, "");
 
+// ---------- correção de músicas que entraram com o nome errado ----------
+const GW = { f: "F", fem: "F", feminina: "F", feminino: "F", i: "I", inter: "I", intermediaria: "I", intermediario: "I", m: "M", masc: "M", masculina: "M", masculino: "M" };
+const GRANK = { F: 0, I: 1, M: 2 };
+// "Acaso FEM PP" -> { base: "Acaso", g: "F", fmt: "piano" }; "Acaso F" -> { base: "Acaso", g: "F" }
+function parseWrong(name) {
+  let toks = String(name || "").split(/[\s_\-]+/).filter(Boolean), g = "", fmt = "";
+  toks = toks.filter((t, i) => {
+    const n = C.norm(t);
+    if (n === "pp") { fmt = "piano"; return false; }
+    if (n === "tp") { fmt = "trio"; return false; }
+    if (GW[n] && (n.length > 1 || i === toks.length - 1 || i >= toks.length - 3)) { g = GW[n]; return false; }
+    if (/^(720p\d*|1080p|fast|hd|playback|video|karaoke)$/.test(n)) return false;
+    return true;
+  });
+  return { base: toks.join(" ").trim(), g, fmt };
+}
+const acervoAll = () => [...ACERVO_TRIO.map(a => ({ name: a[0], fmt: "trio" })), ...ACERVO_PIANO.map(a => ({ name: a[0], fmt: "piano" }))];
+const sameKey = (a, b) => { const x = /^([FIM])-(.+)$/.exec(a) || [0, "", a], y = /^([FIM])-(.+)$/.exec(b) || [0, "", b]; return x[2].toLowerCase() === y[2].toLowerCase() && (!x[1] || !y[1] || x[1] === y[1]); };
+// sugestão automática: qual música do acervo é esta
+function suggest(s) {
+  const p = parseWrong(s.name); const fmt = p.fmt || (s.formacao === "piano" ? "piano" : "trio");
+  const hit = acervoAll().find(a => a.fmt === fmt && matchKey(a.name) === matchKey(p.base)) || acervoAll().find(a => matchKey(a.name) === matchKey(p.base));
+  return hit ? { name: hit.name, fmt: hit.fmt, g: p.g } : null;
+}
+
+let LOCAL = {};
 function build() {
-  const songs = C.getSongs(); const used = new Set(); const rows = [];
+  const songs = C.getSongs().filter(x => LOCAL[x.id] !== null).map(x => LOCAL[x.id] || x).concat(Object.values(LOCAL).filter(x => x && !C.getSongs().some(y => y.id === x.id))); const used = new Set(); const rows = [];
   for (const [fmt, list] of [["trio", ACERVO_TRIO], ["piano", ACERVO_PIANO]]) {
     for (const [name, tons, bpm] of list) {
       const s = songs.find(x => !used.has(x.id) && (x.formacao === "piano" ? "piano" : "trio") === fmt && matchKey(x.name) === matchKey(name));
@@ -45,6 +71,39 @@ export function openRelatorio(ctx) {
   const box = el("div", "stack"); box.style.cssText = "max-width:760px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 18px calc(60px + env(safe-area-inset-bottom))";
   root.appendChild(box); document.body.appendChild(root); document.body.style.overflow = "hidden";
   const close = () => { root.remove(); document.body.style.overflow = ""; };
+  const local = LOCAL = {}; // músicas já salvas nesta sessão (antes de o app receber a atualização)
+  const songNow = id => local[id] || C.getSongs().find(x => x.id === id);
+
+  // junta a música errada (src) na música certa do acervo (nome + formação) e apaga a errada
+  async function merge(srcId, name, fmt) {
+    const src = songNow(srcId); if (!src) return;
+    const g = parseWrong(src.name).g;
+    const ex = Object.values(local).filter(Boolean).concat(C.getSongs()).find(x => x && local[x.id] !== null && x.id !== srcId && (x.formacao === "piano" ? "piano" : "trio") === fmt && matchKey(x.name) === matchKey(name));
+    const id = ex ? ex.id : C.slug(name) + (fmt === "piano" ? "-piano" : "");
+    const keys = JSON.parse(JSON.stringify((ex && ex.keys) || [])); keys.forEach(k => { k.sheets = C.sheetsOf(k); delete k.sheet; });
+    for (const k0 of src.keys || []) {
+      const key = fmt === "piano" && g && !/^[FIM]-/.test(k0.key) ? g + "-" + k0.key : k0.key;
+      let k = keys.find(x => sameKey(x.key, key));
+      if (!k) { k = { key, video: null, sheets: [] }; keys.push(k); }
+      if (!k.video && k0.video) k.video = k0.video;
+      for (const sh of C.sheetsOf(k0)) if (!k.sheets.some(x => C.norm(x.label) === C.norm(sh.label))) k.sheets.push(sh);
+    }
+    if (fmt === "piano") keys.sort((a, b) => (GRANK[(a.key.match(/^([FIM])-/) || [])[1]] ?? 9) - (GRANK[(b.key.match(/^([FIM])-/) || [])[1]] ?? 9));
+    const data = { name: ex ? ex.name : name, formacao: fmt, bpm: (ex && ex.bpm) || src.bpm || null, letra: (ex && ex.letra) || src.letra || null,
+      keys: keys.filter(k => k.video).map(k => ({ key: k.key, video: k.video, sheets: k.sheets || [] })) };
+    await C.saveSong(id, data); local[id] = { id, ...data };
+    if (srcId !== id) { await C.deleteSong(srcId); local[srcId] = null; }
+  }
+  const wrongs = () => C.getSongs().filter(x => local[x.id] !== null && build().some(r => r.soApp && r.id === x.id));
+  async function autoFix() {
+    const list = wrongs().map(x => ({ x, sg: suggest(x) })).filter(o => o.sg);
+    if (!list.length) return C.toast("Não achei nenhuma para juntar sozinha. Use Juntar em cada uma.");
+    if (!confirm("Juntar estas músicas nas certas e apagar as erradas?\n\n" + list.map(o => o.x.name + "  →  " + o.sg.name + " (" + (o.sg.fmt === "trio" ? "Trio" : "Piano") + ")").join("\n"))) return;
+    S.busy = "Corrigindo..."; render();
+    try { for (const o of list) await merge(o.x.id, o.sg.name, o.sg.fmt); C.toast("Pronto: " + list.length + (list.length > 1 ? " corrigidas." : " corrigida.")); }
+    catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
+    S.busy = ""; render();
+  }
 
   function render() {
     const rows = build();
@@ -52,7 +111,7 @@ export function openRelatorio(ctx) {
     const t = sum("trio"), p = sum("piano");
     const cnt = (f, test) => rows.filter(r => (f === "all" || r.fmt === f) && test(r)).length;
     const vis = rows.filter(r => (S.fmt === "all" || r.fmt === S.fmt)
-      && (S.sit === "all" || (S.sit === "pend" && r.inApp && r.falta.length) || (S.sit === "fora" && !r.inApp) || (S.sit === "ok" && r.inApp && !r.falta.length)
+      && (S.sit === "all" || (S.sit === "wrong" && r.soApp) || (S.sit === "pend" && r.inApp && r.falta.length) || (S.sit === "fora" && !r.inApp) || (S.sit === "ok" && r.inApp && !r.falta.length)
         || (S.sit === "bpm" && r.inApp && !r.bpm) || (S.sit === "letra" && r.inApp && !r.letra) || (S.sit === "part" && r.semPart && r.semPart.length))
       && (!S.q || C.norm(r.name).includes(C.norm(S.q))))
       .sort((a, b) => C.norm(a.name).localeCompare(C.norm(b.name)));
@@ -65,6 +124,13 @@ export function openRelatorio(ctx) {
         <div><b>Piano</b><div class="small muted">${p.on} de ${p.all} no app  ·  ${p.ok} completas</div></div></div>
         <p class="small muted" style="margin:0">Completa = todos os tons com vídeo, letra, BPM e, no Trio, partitura em cada tom. No Piano a partitura não é cobrada.</p>
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
+      ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
+      ${(() => { const w = rows.filter(r => r.soApp); if (!w.length) return ""; const auto = w.filter(r => suggest(songNow(r.id) || { name: r.name })).length;
+        return `<div class="card" style="border-color:var(--warn)"><b>${w.length} ${w.length > 1 ? "músicas entraram" : "música entrou"} com nome que não bate com o acervo</b>
+          <p class="small muted" style="margin:0">Em cada uma, escolha qual é a música certa e toque em Juntar: os vídeos, letras e partituras passam para a música certa e a errada some. Ou toque em Apagar.</p>
+          ${auto ? `<button class="btn primary" data-r="autofix">Corrigir ${auto} automaticamente</button>` : ""}
+          <button class="btn sm ghost" data-rk="sit" data-rv="wrong">Ver só essas (${w.length})</button></div>`; })()}
+      <datalist id="acv">${acervoAll().map(a => `<option value="${C.esc(a.name)} (${a.fmt === "trio" ? "Trio" : "Piano"})">`).join("")}</datalist>
       <div class="tabs" role="radiogroup">${tab("fmt", "all", "Todas")}${tab("fmt", "trio", "Trio")}${tab("fmt", "piano", "Piano")}</div>
       <div class="hrow" style="flex-wrap:wrap;gap:6px">${sit.map(([v, l, n]) => `<button class="btn sm ${S.sit === v ? "primary" : "ghost"}" data-rk="sit" data-rv="${v}">${l} (${n})</button>`).join("")}</div>
       <input class="field" id="rq" placeholder="Procurar música" value="${C.esc(S.q)}">
@@ -72,6 +138,7 @@ export function openRelatorio(ctx) {
         <span class="name" style="flex:1 1 100%">${C.esc(r.name)}  <span class="pill fmt-${r.fmt}">${r.fmt === "trio" ? "Trio" : "Piano"}</span>${r.inApp ? "" : `  <span class="pill">fora do app</span>`}
           <br><span class="small muted" style="font-weight:500">Tons: ${(r.tons.length ? r.tons : r.appKeys).map(x => C.esc(x) + (r.foraTons.includes(x) ? " (falta)" : "")).join(" / ") || "não informados"}${r.inApp ? `  ·  Letra: ${r.letra ? "tem" : "falta"}${r.fmt === "trio" ? `  ·  Partitura: ${r.semPart.length ? "falta em " + r.semPart.map(C.esc).join(", ") : "tem"}` : ""}` : ""}</span>
           ${r.falta.length && r.inApp ? `<br><span class="small" style="color:var(--warn)">${C.esc(r.falta.join("; "))}</span>` : ""}</span>
+        ${r.soApp ? (() => { const sg = suggest(songNow(r.id) || { name: r.name }); return `<div class="hrow" style="flex:1 1 100%;flex-wrap:wrap;gap:6px"><input class="field" style="flex:1;min-width:180px;padding:6px 8px" list="acv" data-fix="${r.id}" placeholder="Qual é a música certa?" value="${sg ? C.esc(sg.name + " (" + (sg.fmt === "trio" ? "Trio" : "Piano") + ")") : ""}"><button class="btn sm primary" data-r="join" data-id="${r.id}">Juntar</button><button class="btn sm danger" data-r="del" data-id="${r.id}">Apagar</button></div>`; })() : ""}
         ${r.inApp ? `<button class="btn sm primary" data-r="open" data-id="${r.id}">Abrir</button>` : `<button class="btn sm" data-r="new" data-n="${C.esc(r.name)}" data-f="${r.fmt}" data-t="${C.esc(r.tons.join("/"))}" data-b="${C.esc(r.bpmSug)}">Cadastrar</button>`}
         ${r.inApp ? `<label class="small muted" style="display:flex;align-items:center;gap:6px">BPM <input class="field" style="width:80px;padding:6px 8px" inputmode="numeric" data-bpm="${r.id}" value="${C.esc(r.bpm)}" placeholder="${C.esc(r.bpmSug)}"></label>${!r.bpm && r.bpmSug ? `<button class="btn sm ghost" data-r="usebpm" data-id="${r.id}" data-v="${C.esc(r.bpmSug)}">Usar ${C.esc(r.bpmSug)}</button>` : ""}` : ""}
       </div>`).join("") || `<p class="muted">Nenhuma música aqui.</p>`}</div>`;
@@ -89,7 +156,7 @@ export function openRelatorio(ctx) {
   }
 
   async function saveBpm(id, v) {
-    try { await C.saveBpm(id, v || null); const s = C.getSongs().find(x => x.id === id); if (s) s.bpm = v || null; C.toast(v ? "BPM salvo." : "BPM apagado."); render(); }
+    try { await C.saveBpm(id, v || null); const s = songNow(id); if (s) s.bpm = v || null; C.toast(v ? "BPM salvo." : "BPM apagado."); render(); }
     catch (e) { console.warn(e); C.toast("Não consegui salvar o BPM."); }
   }
 
@@ -99,6 +166,17 @@ export function openRelatorio(ctx) {
     else if (b.dataset.r === "csv") csv();
     else if (b.dataset.r === "open") { const st = { fmt: S.fmt, sit: S.sit, q: S.q, y: root.scrollTop }; close(); C.openSong(b.dataset.id, st); }
     else if (b.dataset.r === "new") { const st = { fmt: S.fmt, sit: S.sit, q: S.q, y: root.scrollTop }; close(); C.newSong(b.dataset.n, b.dataset.f, b.dataset.t ? b.dataset.t.split("/") : [], b.dataset.b, st); }
+    else if (b.dataset.r === "autofix") autoFix();
+    else if (b.dataset.r === "join") {
+      const v = (box.querySelector(`[data-fix="${b.dataset.id}"]`) || {}).value || ""; const m = v.match(/^(.*?)\s*\((Trio|Piano)\)\s*$/);
+      const a = m && acervoAll().find(x => x.name === m[1] && x.fmt === m[2].toLowerCase());
+      if (!a) return C.toast("Escolha a música certa na lista.");
+      (async () => { S.busy = "Juntando..."; render(); try { await merge(b.dataset.id, a.name, a.fmt); C.toast("Juntei em " + a.name + "."); } catch (e) { console.warn(e); C.toast("Erro: " + (e.code || e.message)); } S.busy = ""; render(); })();
+    }
+    else if (b.dataset.r === "del") {
+      const x = songNow(b.dataset.id); if (!x || !confirm("Apagar \"" + x.name + "\" do app?")) return;
+      (async () => { try { await C.deleteSong(x.id); local[x.id] = null; C.toast("Apagada."); } catch (e) { C.toast("Erro: " + (e.code || e.message)); } render(); })();
+    }
     else if (b.dataset.r === "usebpm") saveBpm(b.dataset.id, b.dataset.v);
     else if (b.dataset.rk) { S[b.dataset.rk] = b.dataset.rv; render(); }
   });
