@@ -15,6 +15,9 @@ let C = null;
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const TONE = /([A-G])(#|b|♯|♭)?(m)?(?![a-z])/;
 const toneKey = s => { s = String(s || "").replace(/^\s*[FIM]\s*-\s*/, ""); const m = String(s || "").match(TONE); return m ? (m[1] + (m[2] || "").replace("♯", "#").replace("♭", "b") + (m[3] || "")) : C.norm(s); };
+const exactKey = s => C.slug(s).replace(/(^|-)ii($|-)/g, "$12$2");
+// procura primeiro pelo nome exato; só se não achar, aceita sem o artigo ("O caderno" = "Caderno")
+function findBest(list, nameOf, name) { return list.find(x => exactKey(nameOf(x)) === exactKey(name)) || (list.some(x => exactKey(nameOf(x)) === exactKey(name)) ? null : list.find(x => matchKey(nameOf(x)) === matchKey(name))); }
 const matchKey = s => C.slug(s).replace(/(^|-)ii($|-)/g, "$12$2").replace(/(^|-)(o|a|os|as)(-|$)/g, "$1$3").replace(/-+/g, "-").replace(/^-|-$/g, "");
 
 // ---------- correção de músicas que entraram com o nome errado ----------
@@ -42,10 +45,10 @@ const sameKey = (a, b) => { const x = /^([FIM])-(.+)$/.exec(a) || [0, "", a], y 
 // sugestão automática: qual música do acervo é esta
 function suggest(s) {
   const p = parseWrong(s.name); const fmt = p.fmt || (s.formacao === "piano" ? "piano" : "trio");
-  const same = acervoAll().find(a => a.fmt === fmt && matchKey(a.name) === matchKey(p.base));
+  const same = findBest(acervoAll().filter(a => a.fmt === fmt), a => a.name, p.base);
   if (same) return { name: same.name, fmt: same.fmt, g: p.g };
   // mesma música só na outra formação: pode ser a versão Trio/Piano ainda não listada
-  const other = acervoAll().find(a => a.fmt !== fmt && matchKey(a.name) === matchKey(p.base));
+  const other = findBest(acervoAll().filter(a => a.fmt !== fmt), a => a.name, p.base);
   return other ? { name: other.name, fmt: other.fmt, g: p.g, cross: true, own: fmt } : null;
 }
 
@@ -54,7 +57,9 @@ function build() {
   const songs = C.getSongs().filter(x => LOCAL[x.id] !== null).map(x => LOCAL[x.id] || x).concat(Object.values(LOCAL).filter(x => x && !C.getSongs().some(y => y.id === x.id))); const used = new Set(); const rows = [];
   for (const [fmt, list] of [["trio", listTrio()], ["piano", listPiano()]]) {
     for (const [name, tons, bpm] of list) {
-      const s = songs.find(x => !used.has(x.id) && (x.formacao === "piano" ? "piano" : "trio") === fmt && matchKey(x.name) === matchKey(name));
+      const cands = songs.filter(x => !used.has(x.id) && (x.formacao === "piano" ? "piano" : "trio") === fmt);
+      // nome exato primeiro; sem artigo só se nenhuma outra música do acervo tiver esse nome exato
+      const s = cands.find(x => exactKey(x.name) === exactKey(name)) || cands.find(x => matchKey(x.name) === matchKey(name) && !list.some(a => exactKey(a[0]) === exactKey(x.name)));
       if (s) used.add(s.id);
       rows.push(row(fmt, name, tons.split("/").map((t, i) => (t = t.trim()) && t !== "—" ? (fmt === "piano" ? "FIM"[i] + "-" + t : t) : "").filter(Boolean), bpm, s));
     }
@@ -101,7 +106,7 @@ export function openRelatorio(ctx) {
   async function merge(srcId, name, fmt) {
     const src = songNow(srcId); if (!src) return;
     const g = parseWrong(src.name).g;
-    const ex = Object.values(local).filter(Boolean).concat(C.getSongs()).find(x => x && local[x.id] !== null && x.id !== srcId && (x.formacao === "piano" ? "piano" : "trio") === fmt && matchKey(x.name) === matchKey(name));
+    const ex = Object.values(local).filter(Boolean).concat(C.getSongs()).find(x => x && local[x.id] !== null && x.id !== srcId && (x.formacao === "piano" ? "piano" : "trio") === fmt && exactKey(x.name) === exactKey(name));
     const id = ex ? ex.id : C.slug(name) + (fmt === "piano" ? "-piano" : "");
     const keys = JSON.parse(JSON.stringify((ex && ex.keys) || [])); keys.forEach(k => { k.sheets = C.sheetsOf(k); delete k.sheet; });
     for (const k0 of src.keys || []) {
@@ -123,7 +128,7 @@ export function openRelatorio(ctx) {
     const out = [];
     for (const x of C.getSongs()) {
       if (local[x.id] === null || x.formacao !== "piano") continue;
-      const cur = local[x.id] || x; const a = listPiano().find(l => matchKey(l[0]) === matchKey(cur.name)); if (!a) continue;
+      const cur = local[x.id] || x; const a = findBest(listPiano(), l => l[0], cur.name); if (!a) continue;
       const tons = a[1].split("/").map(t => t.trim());
       let changed = false;
       const keys = (cur.keys || []).map(k => {
@@ -147,7 +152,7 @@ export function openRelatorio(ctx) {
   // nomes fora do padrão (maiúsculas/acentos): usa a grafia do acervo ou só a primeira letra maiúscula
   const PROPER = ["Deus", "Maria", "João", "José", "Jesus", "Rio", "Ipanema", "Brasil", "Natal", "América", "Bahia", "Minas", "Itapuã", "Santo", "Amaro", "Odeon", "Saigon", "Luiza", "Madalena", "Beatriz", "Sampa", "Copacabana", "Senhora", "Nossa", "Índio", "Branca", "Gita", "Asa", "I", "II", "Love", "You"];
   function properName(name, fmt) {
-    const hit = (fmt === "piano" ? listPiano() : listTrio()).find(a => matchKey(a[0]) === matchKey(name) && C.slug(a[0]).replace(/^(o|a|os|as)-/, "") === C.slug(name).replace(/^(o|a|os|as)-/, ""));
+    const hit = (fmt === "piano" ? listPiano() : listTrio()).find(a => exactKey(a[0]) === exactKey(name));
     if (hit) return hit[0];
     return String(name || "").trim().replace(/\s+/g, " ").split(" ").map((w, i) => {
       const p = PROPER.find(x => C.norm(x) === C.norm(w)); if (p && i > 0) return p;
@@ -178,7 +183,7 @@ export function openRelatorio(ctx) {
       if (fmt === "piano" && keys.some(k => !/^[FIM]-/.test(k))) add(x.id, "tom do Piano sem F-, I- ou M-");
       if (fmt === "trio" && keys.some(k => /^[FIM]-/.test(k))) add(x.id, "tom do Trio com F-, I- ou M- (no Trio é só o tom)");
       if (x.bpm && !/^\d{2,3}$/.test(String(x.bpm))) add(x.id, "BPM com texto (deixe só o número)");
-      const dk = fmt + "|" + matchKey(x.name); (seen[dk] = seen[dk] || []).push(x.id);
+      const dk = fmt + "|" + exactKey(x.name); (seen[dk] = seen[dk] || []).push(x.id);
     }
     for (const ids of Object.values(seen)) if (ids.length > 1) ids.forEach(id => add(id, "música repetida (junte ou apague)"));
     for (const r of rows) if (r.soApp && r.id) add(r.id, "não está na lista do acervo");
