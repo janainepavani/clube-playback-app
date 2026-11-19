@@ -17,7 +17,22 @@ const VIDEO_EXT = ["mp4", "m4v", "mov"], DOC_EXT = ["pdf", "jpg", "jpeg", "png",
 const TONE = /^([A-G])(#|b|♯|♭)?(m)?$/;
 const SPLIT = /[\s_\-.()[\],+&]+/;
 
-import { ACERVO_PIANO } from "./acervo.js";
+import { ACERVO_PIANO, ACERVO_TRIO } from "./acervo.js";
+// Nome da música sempre regular: se está no acervo, usa a grafia do acervo (acentos e maiúsculas certos);
+// se é nova, só a primeira letra maiúscula (mantém nomes próprios conhecidos)
+const PROPER = ["Deus", "Maria", "João", "José", "Jesus", "Rio", "Ipanema", "Brasil", "Natal", "América", "Bahia", "Minas", "Itapuã", "Santo", "Amaro", "Odeon", "Saigon", "Luiza", "Madalena", "Beatriz", "Sampa", "Copacabana", "Senhora", "Nossa", "Índio", "Branca", "Gita", "Asa", "I", "II", "Love", "You"];
+function properName(name) {
+  const sl = C.slug(name);
+  const hit = ACERVO_TRIO.concat(ACERVO_PIANO).find(a => C.slug(a[0]) === sl);
+  if (hit) return hit[0];
+  const words = String(name || "").trim().replace(/\s+/g, " ").split(" ");
+  return words.map((w, i) => {
+    const p = PROPER.find(x => C.norm(x) === C.norm(w));
+    if (p && i > 0) return p;
+    const lw = w.toLocaleLowerCase("pt-BR");
+    return i === 0 ? lw.charAt(0).toLocaleUpperCase("pt-BR") + lw.slice(1) : lw;
+  }).join(" ");
+}
 let C = null; // contexto vindo do app.js
 // No Piano, todo tom fica no padrão do app: F-E (Feminina), I-C (Intermediária), M-A (Masculina)
 const hasGen = t => /^[FIM]-/.test(String(t || ""));
@@ -179,7 +194,7 @@ export function openLote(ctx) {
       const k = fmt + "|" + C.slug(m.song);
       if (!gByName[k]) {
         const ex = findSong(m.song, fmt);
-        gByName[k] = { gid: "g" + S.groups.length, name: ex ? ex.name : m.song, fmt, bpm: ex && ex.bpm ? ex.bpm : "", order: [] };
+        gByName[k] = { gid: "g" + S.groups.length, name: ex ? ex.name : properName(m.song), fmt, bpm: ex && ex.bpm ? ex.bpm : "", order: [] };
         S.groups.push(gByName[k]);
       }
       const ext = extOf(m.file.name);
@@ -410,4 +425,4 @@ export function openLote(ctx) {
 }
 
 // usado nos testes
-export const _test = { toneIn, songFromFile, sheetLabel, cleanSong, setCtx: c => { C = c; } };
+export const _test = { toneIn, songFromFile, sheetLabel, cleanSong, properName, setCtx: c => { C = c; } };

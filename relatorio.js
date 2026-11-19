@@ -140,6 +140,26 @@ export function openRelatorio(ctx) {
     catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
     S.busy = ""; render();
   }
+  // nomes fora do padrão (maiúsculas/acentos): usa a grafia do acervo ou só a primeira letra maiúscula
+  const PROPER = ["Deus", "Maria", "João", "José", "Jesus", "Rio", "Ipanema", "Brasil", "Natal", "América", "Bahia", "Minas", "Itapuã", "Santo", "Amaro", "Odeon", "Saigon", "Luiza", "Madalena", "Beatriz", "Sampa", "Copacabana", "Senhora", "Nossa", "Índio", "Branca", "Gita", "Asa", "I", "II", "Love", "You"];
+  function properName(name, fmt) {
+    const hit = (fmt === "piano" ? listPiano() : listTrio()).find(a => matchKey(a[0]) === matchKey(name) && C.slug(a[0]).replace(/^(o|a|os|as)-/, "") === C.slug(name).replace(/^(o|a|os|as)-/, ""));
+    if (hit) return hit[0];
+    return String(name || "").trim().replace(/\s+/g, " ").split(" ").map((w, i) => {
+      const p = PROPER.find(x => C.norm(x) === C.norm(w)); if (p && i > 0) return p;
+      const lw = w.toLocaleLowerCase("pt-BR"); return i === 0 ? lw.charAt(0).toLocaleUpperCase("pt-BR") + lw.slice(1) : lw;
+    }).join(" ");
+  }
+  const namePlan = () => C.getSongs().filter(x => local[x.id] !== null).map(x => local[x.id] || x)
+    .map(x => ({ x, n: properName(x.name, x.formacao === "piano" ? "piano" : "trio") })).filter(o => o.n && o.n !== o.x.name && !parseWrong(o.x.name).g && !parseWrong(o.x.name).fmt);
+  async function nameFix() {
+    const plan = namePlan(); if (!plan.length) return;
+    if (!confirm("Arrumar o nome destas músicas?\n\n" + plan.map(o => o.x.name + "  →  " + o.n).join("\n"))) return;
+    S.busy = "Arrumando os nomes..."; render();
+    try { for (const o of plan) { const d = { name: o.n, formacao: o.x.formacao === "piano" ? "piano" : "trio", bpm: o.x.bpm || null, letra: o.x.letra || null, keys: (o.x.keys || []).map(k => ({ key: k.key, video: k.video, sheets: C.sheetsOf(k) })) }; await C.saveSong(o.x.id, d); local[o.x.id] = { id: o.x.id, ...d }; } C.toast("Nomes arrumados: " + plan.length + "."); }
+    catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
+    S.busy = ""; render();
+  }
   // BPM que o acervo já conhece, para as músicas do app que ainda não têm
   const bpmPlan = () => build().filter(r => r.inApp && !r.bpm && r.bpmSug);
   async function bpmFill() {
@@ -182,6 +202,8 @@ export function openRelatorio(ctx) {
         <button class="btn sm ${COUNT_LETRA ? "primary" : "ghost"}" data-r="letratoggle">${COUNT_LETRA ? "Letra conta como pendência (toque para tirar)" : "Letra não conta como pendência (toque para contar)"}</button>
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
       ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
+      ${(() => { const n = namePlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>${n} ${n > 1 ? "músicas estão" : "música está"} com o nome fora do padrão (maiúsculas ou acentos)</b>
+        <button class="btn primary" data-r="namefix">Arrumar ${n > 1 ? "os nomes" : "o nome"}</button></div>` : ""; })()}
       ${(() => { const n = bpmPlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>Já sei o BPM de ${n} ${n > 1 ? "músicas que estão" : "música que está"} sem BPM no app</b>
         <button class="btn primary" data-r="bpmfill">Preencher ${n > 1 ? "os " + n + " BPMs" : "o BPM"}</button></div>` : ""; })()}
       ${(() => { const n = genPlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>${n} ${n > 1 ? "músicas do Piano estão" : "música do Piano está"} com tom sem F-, I- ou M-</b>
@@ -235,6 +257,7 @@ export function openRelatorio(ctx) {
     else if (b.dataset.r === "autofix") autoFix();
     else if (b.dataset.r === "genfix") genFix();
     else if (b.dataset.r === "bpmfill") bpmFill();
+    else if (b.dataset.r === "namefix") nameFix();
     else if (b.dataset.r === "letratoggle") { COUNT_LETRA = !COUNT_LETRA; lsSet("cp-rel-letra", COUNT_LETRA ? "1" : "0"); render(); }
     else if (b.dataset.r === "addnew") {
       const x = songNow(b.dataset.id); if (!x) return;
