@@ -79,6 +79,7 @@ function genIn(s) {
   const str = String(s); const at = last.index + last[1].length;
   return { g: last[2], tone: fixTone(last[3]), rest: (str.slice(0, at) + " " + str.slice(at + last[0].length - last[1].length)).replace(/\s+/g, " ").trim() };
 }
+function toneAtEnd(s) { const t = String(s || "").split(SPLIT).filter(Boolean).pop() || ""; const f = fixTone(t); return TONE.test(f) ? f : ""; }
 function toneIn(s) {
   const gm = genIn(s); if (gm) return gm.tone;
   const toks = String(s || "").split(SPLIT).filter(Boolean);
@@ -103,7 +104,7 @@ function cleanSong(s) {
 // noTone: não procura tom solto (arquivo de letra, ou pasta no padrão F-/I-/M- do Piano)
 function songFromFile(name, noTone) {
   const gm = genIn(stripBpm(baseOf(name))); const base = gm ? gm.rest : stripBpm(baseOf(name));
-  const tone = gm || noTone || /letra/.test(C.norm(name)) ? "" : toneIn(base);
+  const tone = gm || /letra/.test(C.norm(name)) ? "" : noTone ? toneAtEnd(stripBpm(base)) : toneIn(base);
   let toks = base.split(/[\s_()[\]]+/).filter(t => t && !/^[-–,.+&]+$/.test(t));
   if (tone) { const i = toks.map(fixTone).lastIndexOf(tone); if (i >= 0) toks.splice(i, 1); }
   if (toks.length > 1 && /^\d{1,3}$/.test(toks[0])) toks.shift();
@@ -218,7 +219,7 @@ export function openLote(ctx) {
       const ext = extOf(m.file.name);
       // tom: no arquivo; se não tiver, na subpasta mais próxima
       const gmf = genIn(baseOf(m.file.name));
-      let tone = gmf ? (gmf.tone ? gmf.g + "-" + gmf.tone : "") : strict(m) || /letra/.test(C.norm(m.file.name)) ? "" : toneIn(baseOf(m.file.name)); if (!tone && !strict(m)) for (let i = m.dirs.length - 1; i >= 0 && !tone; i--) tone = (m.dirs[i].split(SPLIT).length <= 3) ? toneIn(m.dirs[i]) : "";
+      let tone = gmf ? (gmf.tone ? gmf.g + "-" + gmf.tone : "") : /letra/.test(C.norm(m.file.name)) ? "" : strict(m) ? toneAtEnd(stripBpm(baseOf(m.file.name))) : toneIn(baseOf(m.file.name)); if (!tone && !strict(m)) for (let i = m.dirs.length - 1; i >= 0 && !tone; i--) tone = (m.dirs[i].split(SPLIT).length <= 3) ? toneIn(m.dirs[i]) : "";
       let type = "skip", note = "";
       if (VIDEO_EXT.includes(ext)) type = "video";
       else if (DOC_EXT.includes(ext)) type = /letra/.test(C.norm(m.file.name)) ? "letra" : "sheet";
@@ -234,7 +235,7 @@ export function openLote(ctx) {
     await Promise.all([0, 1, 2, 3].map(async () => { while (idx < vids.length) { const v = vids[idx++]; v.h = await videoHeight(v.file); S.now = "Conferindo os vídeos (" + idx + " de " + vids.length + ")"; const p = box.querySelector("#lnow"); if (p) p.textContent = S.now; } }));
     // dois vídeos no mesmo tom: fica o de 720p (ou o menor)
     const byTone = {};
-    for (const v of vids.filter(v => v.type === "video")) (byTone[v.gid + "|" + v.tone] = byTone[v.gid + "|" + v.tone] || []).push(v);
+    for (const v of vids.filter(v => v.type === "video" && v.tone)) (byTone[v.gid + "|" + v.tone] = byTone[v.gid + "|" + v.tone] || []).push(v);
     for (const arr of Object.values(byTone)) {
       if (arr.length < 2) continue;
       arr.sort((a, b) => ((a.h && a.h <= 720) ? 0 : 1) - ((b.h && b.h <= 720) ? 0 : 1) || a.file.size - b.file.size);
