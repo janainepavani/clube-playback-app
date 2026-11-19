@@ -13,6 +13,7 @@ import {
   getStorage, ref as sref, getBlob, uploadBytesResumable, uploadBytes
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { firebaseConfig } from "./firebase-config.js";
+import { ACERVO_PIANO, ACERVO_TRIO } from "./acervo.js";
 
 const ADMIN_EMAIL = "janaine@janainepavani.com";
 // Testadoras: veem as funções em teste (ex.: Gravar meu vídeo), sem acesso ao Painel
@@ -790,7 +791,7 @@ function viewSongForm() {
   <form class="stack" id="songForm" style="margin-top:12px">
     <h1 class="title">${f.id ? "Editar música" : "Nova música"}</h1>
     <div class="card">
-      <label for="sName">Nome da música</label><input class="field" id="sName" value="${esc(f.name)}" required ${f.id ? "readonly" : ""}>
+      <label for="sName">Nome da música</label><input class="field" id="sName" value="${esc(f.name)}" required autocapitalize="sentences">
       <b class="small">Formação</b>
       <div class="tabs" role="radiogroup">${[["trio", "Trio"], ["piano", "Piano"]].map(([v, l]) => `<button type="button" role="radio" aria-selected="${(f.formacao || "trio") === v}" data-a="setfmt" data-f="${v}" ${f.id ? "disabled" : ""}>${l}</button>`).join("")}</div>
       ${f.id ? "" : `<p class="small muted" style="margin:0">Se a música existe no Trio e no Piano, cadastre duas vezes, uma com cada formação.</p>`}
@@ -828,6 +829,9 @@ function upload(path, file, onProg) {
 }
 async function submitSong() {
   readForm(); const f = adminForm;
+  // nome no padrão: grafia do acervo quando a música está na lista; senão, primeira letra maiúscula
+  { const hit = ((f.formacao || "trio") === "piano" ? ACERVO_PIANO : ACERVO_TRIO).find(a => slug(a[0]) === slug(f.name));
+    f.name = hit ? hit[0] : f.name.charAt(0).toLocaleUpperCase("pt-BR") + f.name.slice(1); }
   if (!f.name || f.keys.some(k => !k.key)) return toast("Preencha o nome e as tonalidades.");
   if (f.keys.some(k => !k.video && !k._v)) return toast("Cada tom precisa de um vídeo.");
   if ((f.formacao || "trio") === "piano") {
