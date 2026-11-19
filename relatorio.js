@@ -62,10 +62,18 @@ function row(fmt, name, tons, bpmAcervo, s, soApp) {
   const vk = keys.filter(k => k.video).map(k => k.key);
   r.foraTons = tons.filter(t => !vk.some(k => sameKey(k, t)));
   r.letra = !!s.letra;
-  r.semPart = fmt === "trio" ? keys.filter(k => !C.sheetsOf(k).length).map(k => k.key) : [];
+  // Trio: cada tom precisa de 2 partituras: a da melodia (nome com "melodia") e a sheet music (as outras)
+  const isMel = sh => /melod/i.test(C.norm(sh.label || ""));
+  r.semPart = [];
+  if (fmt === "trio") for (const k of keys) {
+    const sh = C.sheetsOf(k); const miss = [];
+    if (!sh.some(x => !isMel(x))) miss.push("sheet music");
+    if (!sh.some(isMel)) miss.push("melodia");
+    if (miss.length) r.semPart.push(k.key + ": " + miss.join(" e "));
+  }
   if (r.foraTons.length) r.falta.push("falta o tom " + r.foraTons.join(", "));
   if (!r.letra) r.falta.push("falta a letra");
-  if (r.semPart.length) r.falta.push("falta partitura (" + r.semPart.join(", ") + ")");
+  if (r.semPart.length) r.falta.push("falta partitura (" + r.semPart.join("; ") + ")");
   if (!r.bpm) r.falta.push("falta o BPM");
   if (soApp) r.falta.push("não está na lista do acervo");
   return r;
@@ -155,7 +163,7 @@ export function openRelatorio(ctx) {
       <div class="card"><div class="hrow" style="gap:18px;flex-wrap:wrap">
         <div><b>Trio</b><div class="small muted">${t.on} de ${t.all} no app  ·  ${t.ok} completas</div></div>
         <div><b>Piano</b><div class="small muted">${p.on} de ${p.all} no app  ·  ${p.ok} completas</div></div></div>
-        <p class="small muted" style="margin:0">Completa = todos os tons com vídeo, letra, BPM e, no Trio, partitura em cada tom. No Piano a partitura não é cobrada.</p>
+        <p class="small muted" style="margin:0">Completa = todos os tons com vídeo, letra, BPM e, no Trio, duas partituras em cada tom: a sheet music e a da melodia (a da melodia precisa ter "melodia" no nome). No Piano a partitura não é cobrada.</p>
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
       ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
       ${(() => { const n = genPlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>${n} ${n > 1 ? "músicas do Piano estão" : "música do Piano está"} com tom sem F-, I- ou M-</b>
@@ -172,7 +180,7 @@ export function openRelatorio(ctx) {
       <input class="field" id="rq" placeholder="Procurar música" value="${C.esc(S.q)}">
       <div class="list">${vis.map(r => `<div class="row" style="flex-wrap:wrap;row-gap:6px">
         <span class="name" style="flex:1 1 100%">${C.esc(r.name)}  <span class="pill fmt-${r.fmt}">${r.fmt === "trio" ? "Trio" : "Piano"}</span>${r.inApp ? "" : `  <span class="pill">fora do app</span>`}
-          <br><span class="small muted" style="font-weight:500">Tons: ${(r.tons.length ? r.tons : r.appKeys).map(x => C.esc(x) + (r.foraTons.includes(x) ? " (falta)" : "")).join(" / ") || "não informados"}${r.inApp ? `  ·  Letra: ${r.letra ? "tem" : "falta"}${r.fmt === "trio" ? `  ·  Partitura: ${r.semPart.length ? "falta em " + r.semPart.map(C.esc).join(", ") : "tem"}` : ""}` : ""}</span>
+          <br><span class="small muted" style="font-weight:500">Tons: ${(r.tons.length ? r.tons : r.appKeys).map(x => C.esc(x) + (r.foraTons.includes(x) ? " (falta)" : "")).join(" / ") || "não informados"}${r.inApp ? `  ·  Letra: ${r.letra ? "tem" : "falta"}${r.fmt === "trio" ? `  ·  Partituras: ${r.semPart.length ? "falta " + r.semPart.map(C.esc).join("; ") : "sheet music e melodia em todos os tons"}` : ""}` : ""}</span>
           ${r.falta.length && r.inApp ? `<br><span class="small" style="color:var(--warn)">${C.esc(r.falta.join("; "))}</span>` : ""}</span>
         ${r.soApp ? (() => { const sg = suggest(songNow(r.id) || { name: r.name }); return `<div class="stack" style="flex:1 1 100%;gap:8px;padding:10px;border:1px solid var(--warn);border-radius:10px">
           ${sg && sg.cross ? `<b class="small">"${C.esc(sg.name)}" está no acervo do ${sg.fmt === "trio" ? "Trio" : "Piano"}, e aqui ela está como ${sg.own === "trio" ? "Trio" : "Piano"}. É a versão ${sg.own === "trio" ? "Trio" : "Piano"} dessa música?</b>`
@@ -186,10 +194,10 @@ export function openRelatorio(ctx) {
 
   function csv() {
     const rows = build().sort((a, b) => a.fmt.localeCompare(b.fmt) * -1 || C.norm(a.name).localeCompare(C.norm(b.name)));
-    const head = ["Música", "Formação", "No app", "Tons do acervo", "Tons no app", "Tons faltando", "Letra", "Partitura faltando (Trio)", "BPM", "Pendências"];
+    const head = ["Música", "Formação", "No app", "Tons do acervo", "Tons no app", "Tons faltando", "Letra", "Partituras faltando (Trio: sheet music e melodia)", "BPM", "Pendências"];
     const q = v => { v = String(v ?? ""); return /[";\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     const lines = [head, ...rows.map(r => [r.name, r.fmt === "trio" ? "Trio" : "Piano", r.inApp ? "sim" : "não", r.tons.join(" / "), r.appKeys.join(" / "), r.foraTons.join(" / "),
-      r.inApp ? (r.letra ? "tem" : "falta") : "", r.fmt === "trio" && r.inApp ? r.semPart.join(" / ") : "", r.bpm || (r.bpmSug ? r.bpmSug + " (do acervo)" : ""), r.inApp && !r.falta.length ? "completa" : r.falta.join("; ")])];
+      r.inApp ? (r.letra ? "tem" : "falta") : "", r.fmt === "trio" && r.inApp ? r.semPart.join("; ") : "", r.bpm || (r.bpmSug ? r.bpmSug + " (do acervo)" : ""), r.inApp && !r.falta.length ? "completa" : r.falta.join("; ")])];
     const blob = new Blob(["﻿" + lines.map(l => l.map(q).join(";")).join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "acervo-clube-playback-" + new Date().toISOString().slice(0, 10) + ".csv";
     document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
