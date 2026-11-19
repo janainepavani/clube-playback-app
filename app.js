@@ -706,6 +706,18 @@ async function sendSupport() {
 
 /* ---------------- Painel da Janaine ---------------- */
 let adminForm = null; // música sendo editada
+// Relatório do acervo: abre por cima do Painel; "Abrir" leva para a ficha da música e, ao salvar ou voltar, o relatório reabre no mesmo filtro
+let relFrom = false, relState = null;
+async function openRel() {
+  const mod = await import("./relatorio.js");
+  mod.openRelatorio({
+    getSongs: () => S.songs, toast, esc, norm, slug, sheetsOf, state: relState,
+    saveBpm: (id, bpm) => updateDoc(doc(db, "songs", id), { bpm }),
+    openSong: (id, st) => { const s = byId(id); if (!s) return; relState = st; relFrom = true; adminForm = JSON.parse(JSON.stringify({ id: s.id, name: s.name, formacao: fmtOf(s), bpm: s.bpm, letra: s.letra, keys: s.keys })); render(); window.scrollTo(0, 0); },
+    newSong: (name, fmt, tons, bpm, st) => { relState = st; relFrom = true; adminForm = { name, formacao: fmt, bpm: bpm || "", letra: null, keys: (tons.length ? tons : ["", ""]).map(k => ({ key: k, video: null, sheets: [] })) }; render(); window.scrollTo(0, 0); }
+  });
+}
+function backToRel() { if (!relFrom) return; relFrom = false; openRel().catch(e => console.warn(e)); }
 let adminLoading = false;
 async function loadAdmin() {
   const [pend, act, allowed, cfg, mail] = await Promise.all([
@@ -837,7 +849,7 @@ async function submitSong() {
       name: f.name, formacao: f.formacao || "trio", bpm: f.bpm || null, letra: f.letra || null,
       keys: f.keys.map(k => ({ key: k.key, video: k.video, sheets: k.sheets || [] })), updatedAt: serverTimestamp()
     });
-    toast("Música salva."); adminForm = null; render();
+    toast("Música salva."); adminForm = null; render(); backToRel();
   } catch (e) { console.warn(e); msg.textContent = "Erro ao enviar: " + (e.code || e.message) + ". Confira se o armazenamento do Firebase já foi ativado."; }
 }
 
@@ -1016,10 +1028,7 @@ document.addEventListener("click", async e => {
     else if (a === "rmallowed") { await deleteDoc(doc(db, "allowed", el.dataset.em)); S.adminData = null; render(); }
     else if (a === "relatorio") {
       el.disabled = true;
-      try {
-        const mod = await import("./relatorio.js");
-        mod.openRelatorio({ getSongs: () => S.songs, toast, esc, norm, slug, sheetsOf, saveBpm: (id, bpm) => updateDoc(doc(db, "songs", id), { bpm }) });
-      } catch (err) { console.warn(err); toast("Não consegui abrir o relatório."); }
+      try { await openRel(); } catch (err) { console.warn(err); toast("Não consegui abrir o relatório."); }
       finally { el.disabled = false; }
     }
     else if (a === "lote") {
@@ -1039,8 +1048,8 @@ document.addEventListener("click", async e => {
     else if (a === "sheet") { S.sheetIdx = +el.dataset.i; render(); }
     else if (a === "addkey") { readForm(); adminForm.keys.push({ key: "", video: null, sheets: [] }); render(); }
     else if (a === "rmkey") { readForm(); adminForm.keys.splice(+el.dataset.i, 1); render(); }
-    else if (a === "cancelsong") { adminForm = null; render(); }
-    else if (a === "delsong") { await deleteDoc(doc(db, "songs", adminForm.id)); adminForm = null; toast("Música apagada do catálogo."); render(); }
+    else if (a === "cancelsong") { adminForm = null; render(); backToRel(); }
+    else if (a === "delsong") { await deleteDoc(doc(db, "songs", adminForm.id)); adminForm = null; toast("Música apagada do catálogo."); render(); backToRel(); }
   } catch (err) { console.warn(err); toast("Algo deu errado: " + (err.code || err.message)); }
 });
 

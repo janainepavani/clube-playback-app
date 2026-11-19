@@ -40,7 +40,7 @@ function row(fmt, name, tons, bpmAcervo, s, soApp) {
 
 export function openRelatorio(ctx) {
   C = ctx;
-  const S = { fmt: "all", sit: "pend", q: "" };
+  const S = Object.assign({ fmt: "all", sit: "pend", q: "", y: 0 }, ctx.state || {});
   const root = el("div", "lote"); root.style.cssText = "position:fixed;inset:0;z-index:30;background:var(--ink);overflow:auto";
   const box = el("div", "stack"); box.style.cssText = "max-width:760px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 18px calc(60px + env(safe-area-inset-bottom))";
   root.appendChild(box); document.body.appendChild(root); document.body.style.overflow = "hidden";
@@ -72,6 +72,7 @@ export function openRelatorio(ctx) {
         <span class="name" style="flex:1 1 100%">${C.esc(r.name)}  <span class="pill fmt-${r.fmt}">${r.fmt === "trio" ? "Trio" : "Piano"}</span>${r.inApp ? "" : `  <span class="pill">fora do app</span>`}
           <br><span class="small muted" style="font-weight:500">Tons: ${(r.tons.length ? r.tons : r.appKeys).map(x => C.esc(x) + (r.foraTons.includes(x) ? " (falta)" : "")).join(" / ") || "não informados"}${r.inApp ? `  ·  Letra: ${r.letra ? "tem" : "falta"}${r.fmt === "trio" ? `  ·  Partitura: ${r.semPart.length ? "falta em " + r.semPart.map(C.esc).join(", ") : "tem"}` : ""}` : ""}</span>
           ${r.falta.length && r.inApp ? `<br><span class="small" style="color:var(--warn)">${C.esc(r.falta.join("; "))}</span>` : ""}</span>
+        ${r.inApp ? `<button class="btn sm primary" data-r="open" data-id="${r.id}">Abrir</button>` : `<button class="btn sm" data-r="new" data-n="${C.esc(r.name)}" data-f="${r.fmt}" data-t="${C.esc(r.tons.join("/"))}" data-b="${C.esc(r.bpmSug)}">Cadastrar</button>`}
         ${r.inApp ? `<label class="small muted" style="display:flex;align-items:center;gap:6px">BPM <input class="field" style="width:80px;padding:6px 8px" inputmode="numeric" data-bpm="${r.id}" value="${C.esc(r.bpm)}" placeholder="${C.esc(r.bpmSug)}"></label>${!r.bpm && r.bpmSug ? `<button class="btn sm ghost" data-r="usebpm" data-id="${r.id}" data-v="${C.esc(r.bpmSug)}">Usar ${C.esc(r.bpmSug)}</button>` : ""}` : ""}
       </div>`).join("") || `<p class="muted">Nenhuma música aqui.</p>`}</div>`;
   }
@@ -96,6 +97,8 @@ export function openRelatorio(ctx) {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.r === "close") close();
     else if (b.dataset.r === "csv") csv();
+    else if (b.dataset.r === "open") { const st = { fmt: S.fmt, sit: S.sit, q: S.q, y: root.scrollTop }; close(); C.openSong(b.dataset.id, st); }
+    else if (b.dataset.r === "new") { const st = { fmt: S.fmt, sit: S.sit, q: S.q, y: root.scrollTop }; close(); C.newSong(b.dataset.n, b.dataset.f, b.dataset.t ? b.dataset.t.split("/") : [], b.dataset.b, st); }
     else if (b.dataset.r === "usebpm") saveBpm(b.dataset.id, b.dataset.v);
     else if (b.dataset.rk) { S[b.dataset.rk] = b.dataset.rv; render(); }
   });
@@ -108,4 +111,5 @@ export function openRelatorio(ctx) {
     const f = box.querySelector("#rq"); f.focus(); try { f.setSelectionRange(pos, pos); } catch (er) {}
   });
   render();
+  if (S.y) requestAnimationFrame(() => { root.scrollTop = S.y; });
 }
