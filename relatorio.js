@@ -142,8 +142,8 @@ export function openRelatorio(ctx) {
     return out;
   }
   async function genFix() {
-    const plan = genPlan(); if (!plan.length) return;
-    if (!confirm("Colocar F-, I- ou M- nos tons destas músicas do Piano?\n\n" + plan.map(o => o.x.name + ": " + o.keys.map(k => k.key).join(", ")).join("\n"))) return;
+    let plan = genPlan(); if (!plan.length) return;
+    const sel = await pick("Colocar F-, I- ou M- nos tons destas músicas do Piano?", plan.map(o => o.x.name + ": " + o.keys.map(k => k.key).join(", "))); if (!sel) return; plan = sel.map(i => plan[i]);
     S.busy = "Arrumando os tons..."; render();
     try { for (const o of plan) { const d = { name: o.x.name, formacao: "piano", bpm: o.x.bpm || null, letra: o.x.letra || null, keys: o.keys.map(k => ({ key: k.key, video: k.video, sheets: C.sheetsOf(k) })) }; await C.saveSong(o.x.id, d); local[o.x.id] = { id: o.x.id, ...d }; } C.toast("Pronto: " + plan.length + (plan.length > 1 ? " músicas arrumadas." : " música arrumada.")); }
     catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
@@ -162,12 +162,28 @@ export function openRelatorio(ctx) {
   const namePlan = () => C.getSongs().filter(x => local[x.id] !== null).map(x => local[x.id] || x)
     .map(x => ({ x, n: properName(x.name, x.formacao === "piano" ? "piano" : "trio") })).filter(o => o.n && o.n !== o.x.name && !parseWrong(o.x.name).g && !parseWrong(o.x.name).fmt && !parseWrong(o.x.name).bpm);
   async function nameFix() {
-    const plan = namePlan(); if (!plan.length) return;
-    if (!confirm("Arrumar o nome destas músicas?\n\n" + plan.map(o => o.x.name + "  →  " + o.n).join("\n"))) return;
+    let plan = namePlan(); if (!plan.length) return;
+    const sel = await pick("Arrumar o nome destas músicas?", plan.map(o => o.x.name + "  →  " + o.n)); if (!sel) return; plan = sel.map(i => plan[i]);
     S.busy = "Arrumando os nomes..."; render();
     try { for (const o of plan) { const d = { name: o.n, formacao: o.x.formacao === "piano" ? "piano" : "trio", bpm: o.x.bpm || null, letra: o.x.letra || null, keys: (o.x.keys || []).map(k => ({ key: k.key, video: k.video, sheets: C.sheetsOf(k) })) }; await C.saveSong(o.x.id, d); local[o.x.id] = { id: o.x.id, ...d }; } C.toast("Nomes arrumados: " + plan.length + "."); }
     catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
     S.busy = ""; render();
+  }
+  // lista com caixinhas: escolhe quais mudanças aplicar (todas marcadas no começo)
+  function pick(title, labels) {
+    return new Promise(res => {
+      const ov = el("div"); ov.style.cssText = "position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:18px";
+      ov.innerHTML = `<div class="card" style="max-width:560px;width:100%;max-height:85vh;overflow:auto;background:var(--ink)"><b>${C.esc(title)}</b>
+        <p class="small muted" style="margin:0">Desmarque o que não estiver certo. Só o que ficar marcado será mudado.</p>
+        <div class="stack" style="gap:6px">${labels.map((l, i) => `<label class="small" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" data-i="${i}" checked style="margin-top:3px;width:18px;height:18px">${C.esc(l)}</label>`).join("")}</div>
+        <div class="hrow" style="gap:8px;flex-wrap:wrap"><button class="btn primary" data-p="ok">Mudar as marcadas</button><button class="btn" data-p="cancel">Cancelar</button></div></div>`;
+      ov.addEventListener("click", e => {
+        const b = e.target.closest("button"); if (!b) return; e.stopPropagation();
+        const sel = b.dataset.p === "ok" ? [...ov.querySelectorAll("input[data-i]")].filter(x => x.checked).map(x => +x.dataset.i) : null;
+        ov.remove(); res(sel && sel.length ? sel : null);
+      });
+      root.appendChild(ov);
+    });
   }
   // Conferência do padrão: o que está fora da regra em cada música do app
   function padrao() {
@@ -199,17 +215,17 @@ export function openRelatorio(ctx) {
   // BPM que o acervo já conhece, para as músicas do app que ainda não têm
   const bpmPlan = () => build().filter(r => r.inApp && !r.bpm && r.bpmSug);
   async function bpmFill() {
-    const plan = bpmPlan(); if (!plan.length) return;
-    if (!confirm("Preencher o BPM destas músicas?\n\n" + plan.map(r => r.name + " (" + (r.fmt === "trio" ? "Trio" : "Piano") + "): " + r.bpmSug).join("\n"))) return;
+    let plan = bpmPlan(); if (!plan.length) return;
+    const sel = await pick("Preencher o BPM destas músicas?", plan.map(r => r.name + " (" + (r.fmt === "trio" ? "Trio" : "Piano") + "): " + r.bpmSug)); if (!sel) return; plan = sel.map(i => plan[i]);
     S.busy = "Preenchendo os BPMs..."; render();
     try { for (const r of plan) { await C.saveBpm(r.id, r.bpmSug); const x = songNow(r.id); if (x) x.bpm = r.bpmSug; } C.toast("BPM preenchido em " + plan.length + (plan.length > 1 ? " músicas." : " música.")); }
     catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
     S.busy = ""; render();
   }
   async function autoFix() {
-    const list = wrongs().map(x => ({ x, sg: suggest(x) })).filter(o => o.sg && !o.sg.cross);
+    let list = wrongs().map(x => ({ x, sg: suggest(x) })).filter(o => o.sg && !o.sg.cross);
     if (!list.length) return C.toast("Não achei nenhuma para juntar sozinha. Use Juntar em cada uma.");
-    if (!confirm("Juntar estas músicas nas certas e apagar as erradas?\n\n" + list.map(o => o.x.name + "  →  " + o.sg.name + " (" + (o.sg.fmt === "trio" ? "Trio" : "Piano") + ")").join("\n"))) return;
+    const sel = await pick("Juntar estas músicas nas certas e apagar as erradas?", list.map(o => o.x.name + "  →  " + o.sg.name + " (" + (o.sg.fmt === "trio" ? "Trio" : "Piano") + ")")); if (!sel) return; list = sel.map(i => list[i]);
     S.busy = "Corrigindo..."; render();
     try { for (const o of list) await merge(o.x.id, o.sg.name, o.sg.fmt); C.toast("Pronto: " + list.length + (list.length > 1 ? " corrigidas." : " corrigida.")); }
     catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
