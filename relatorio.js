@@ -163,6 +163,33 @@ export function openRelatorio(ctx) {
     catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
     S.busy = ""; render();
   }
+  // Conferência do padrão: o que está fora da regra em cada música do app
+  function padrao() {
+    const songs = C.getSongs().filter(x => local[x.id] !== null).map(x => local[x.id] || x);
+    const rows = build(); const map = {};
+    const add = (id, t) => { (map[id] = map[id] || []).push(t); };
+    const names = new Set(namePlan().map(o => o.x.id));
+    const seen = {};
+    for (const x of songs) {
+      const fmt = x.formacao === "piano" ? "piano" : "trio";
+      if (names.has(x.id)) add(x.id, "nome fora do padrão");
+      const keys = (x.keys || []).map(k => String(k.key || ""));
+      if (fmt === "piano" && keys.some(k => !/^[FIM]-/.test(k))) add(x.id, "tom do Piano sem F-, I- ou M-");
+      if (fmt === "trio" && keys.some(k => /^[FIM]-/.test(k))) add(x.id, "tom do Trio com F-, I- ou M- (no Trio é só o tom)");
+      if (x.bpm && !/^\d{2,3}$/.test(String(x.bpm))) add(x.id, "BPM com texto (deixe só o número)");
+      const dk = fmt + "|" + matchKey(x.name); (seen[dk] = seen[dk] || []).push(x.id);
+    }
+    for (const ids of Object.values(seen)) if (ids.length > 1) ids.forEach(id => add(id, "música repetida (junte ou apague)"));
+    for (const r of rows) if (r.soApp && r.id) add(r.id, "não está na lista do acervo");
+    return map;
+  }
+  // Trio com F-/I-/M- no tom: tira o prefixo
+  async function trioFix(ids) {
+    S.busy = "Arrumando os tons do Trio..."; render();
+    try { for (const id of ids) { const x = songNow(id); const d = { name: x.name, formacao: "trio", bpm: x.bpm || null, letra: x.letra || null, keys: (x.keys || []).map(k => ({ key: String(k.key).replace(/^[FIM]-/, ""), video: k.video, sheets: C.sheetsOf(k) })) }; await C.saveSong(id, d); local[id] = { id, ...d }; } C.toast("Tons do Trio arrumados."); }
+    catch (e) { C.toast("Erro: " + (e.code || e.message)); }
+    S.busy = ""; render();
+  }
   // BPM que o acervo já conhece, para as músicas do app que ainda não têm
   const bpmPlan = () => build().filter(r => r.inApp && !r.bpm && r.bpmSug);
   async function bpmFill() {
@@ -186,11 +213,12 @@ export function openRelatorio(ctx) {
   function render() {
     const rows = build();
     const recent = new Set(lastSent().map(x => x.id));
+    const PAD = padrao();
     const sum = f => { const all = rows.filter(r => r.fmt === f && !r.soApp), on = all.filter(r => r.inApp), ok = on.filter(r => !r.falta.length); return { all: all.length, on: on.length, ok: ok.length }; };
     const t = sum("trio"), p = sum("piano");
     const cnt = (f, test) => rows.filter(r => (f === "all" || r.fmt === f) && test(r)).length;
     const vis = rows.filter(r => (S.fmt === "all" || r.fmt === S.fmt)
-      && (S.sit === "all" || (S.sit === "recent" && r.id && recent.has(r.id)) || (S.sit === "wrong" && r.soApp) || (S.sit === "pend" && r.inApp && r.falta.length) || (S.sit === "fora" && !r.inApp) || (S.sit === "ok" && r.inApp && !r.falta.length)
+      && (S.sit === "all" || (S.sit === "padrao" && r.id && PAD[r.id]) || (S.sit === "recent" && r.id && recent.has(r.id)) || (S.sit === "wrong" && r.soApp) || (S.sit === "pend" && r.inApp && r.falta.length) || (S.sit === "fora" && !r.inApp) || (S.sit === "ok" && r.inApp && !r.falta.length)
         || (S.sit === "bpm" && r.inApp && !r.bpm) || (S.sit === "letra" && r.inApp && !r.letra) || (S.sit === "part" && r.semPart && r.semPart.length))
       && (!S.q || C.norm(r.name).includes(C.norm(S.q))))
       .sort((a, b) => C.norm(a.name).localeCompare(C.norm(b.name)));
@@ -205,6 +233,14 @@ export function openRelatorio(ctx) {
         <button class="btn sm ${COUNT_LETRA ? "primary" : "ghost"}" data-r="letratoggle">${COUNT_LETRA ? "Letra conta como pendência (toque para tirar)" : "Letra não conta como pendência (toque para contar)"}</button>
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
       ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
+      ${(() => { const n = Object.keys(PAD).length; const cnt1 = t => Object.values(PAD).filter(a => a.some(x => x.startsWith(t))).length;
+        const lines = [["nome fora", "Nome fora do padrão"], ["tom do Piano", "Tom do Piano sem F-, I- ou M-"], ["tom do Trio", "Tom do Trio com F-, I- ou M-"], ["BPM com", "BPM com texto"], ["música repetida", "Música repetida"], ["não está", "Fora da lista do acervo"]];
+        const trioIds = Object.entries(PAD).filter(([, a]) => a.some(x => x.startsWith("tom do Trio"))).map(([id]) => id);
+        return `<div class="card" style="border-color:${n ? "var(--warn)" : "var(--ok)"}"><b>Conferência do padrão: ${n ? n + (n > 1 ? " músicas fora do padrão" : " música fora do padrão") : "tudo dentro do padrão"}</b>
+          <div class="small muted">${lines.map(([k, l]) => `${l}: ${cnt1(k) ? `<b style="color:var(--warn)">${cnt1(k)}</b>` : "ok"}`).join("<br>")}</div>
+          ${n ? `<button class="btn sm" data-rk="sit" data-rv="padrao">Ver as músicas fora do padrão (${n})</button>` : ""}
+          ${trioIds.length ? `<button class="btn sm primary" data-r="triofix" data-ids="${trioIds.join(",")}">Tirar F-, I- e M- dos tons do Trio</button>` : ""}
+          <p class="small muted" style="margin:0">Confere: nome igual ao acervo (só a primeira maiúscula, acentos certos), tons do Piano com F-, I- e M-, tons do Trio sem eles, BPM só com número, sem músicas repetidas.</p></div>`; })()}
       ${(() => { const n = namePlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>${n} ${n > 1 ? "músicas estão" : "música está"} com o nome fora do padrão (maiúsculas ou acentos)</b>
         <button class="btn primary" data-r="namefix">Arrumar ${n > 1 ? "os nomes" : "o nome"}</button></div>` : ""; })()}
       ${(() => { const n = bpmPlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>Já sei o BPM de ${n} ${n > 1 ? "músicas que estão" : "música que está"} sem BPM no app</b>
@@ -224,6 +260,7 @@ export function openRelatorio(ctx) {
       <div class="list">${vis.map(r => `<div class="row" style="flex-wrap:wrap;row-gap:6px">
         <span class="name" style="flex:1 1 100%">${C.esc(r.name)}  <span class="pill fmt-${r.fmt}">${r.fmt === "trio" ? "Trio" : "Piano"}</span>${r.inApp ? "" : `  <span class="pill">fora do app</span>`}
           <br><span class="small muted" style="font-weight:500">Tons: ${(r.tons.length ? r.tons : r.appKeys).map(x => C.esc(x) + (r.foraTons.includes(x) ? " (falta)" : "")).join(" / ") || "não informados"}${r.inApp ? `  ·  Letra: ${r.letra ? "tem" : "falta"}${r.fmt === "trio" ? `  ·  Partituras: ${r.semPart.length ? "falta " + r.semPart.map(C.esc).join("; ") : "sheet music e melodia em todos os tons"}` : ""}` : ""}</span>
+          ${r.id && PAD[r.id] ? `<br><span class="small" style="color:var(--bad)">Padrão: ${C.esc(PAD[r.id].join("; "))}</span>` : ""}
           ${r.falta.length && r.inApp ? `<br><span class="small" style="color:var(--warn)">${C.esc(r.falta.join("; "))}</span>` : ""}</span>
         ${r.soApp ? (() => { const sg = suggest(songNow(r.id) || { name: r.name }); return `<div class="stack" style="flex:1 1 100%;gap:8px;padding:10px;border:1px solid var(--warn);border-radius:10px">
           ${sg && sg.cross ? `<b class="small">"${C.esc(sg.name)}" está no acervo do ${sg.fmt === "trio" ? "Trio" : "Piano"}, e aqui ela está como ${sg.own === "trio" ? "Trio" : "Piano"}. É a versão ${sg.own === "trio" ? "Trio" : "Piano"} dessa música?</b>`
@@ -261,6 +298,7 @@ export function openRelatorio(ctx) {
     else if (b.dataset.r === "genfix") genFix();
     else if (b.dataset.r === "bpmfill") bpmFill();
     else if (b.dataset.r === "namefix") nameFix();
+    else if (b.dataset.r === "triofix") trioFix(b.dataset.ids.split(","));
     else if (b.dataset.r === "letratoggle") { COUNT_LETRA = !COUNT_LETRA; lsSet("cp-rel-letra", COUNT_LETRA ? "1" : "0"); render(); }
     else if (b.dataset.r === "addnew") {
       const x = songNow(b.dataset.id); if (!x) return;
