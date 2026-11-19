@@ -259,7 +259,24 @@ function startData() {
 
 /* ---------------- telas ---------------- */
 const byId = id => S.songs.find(s => s.id === id);
-const keyOf = s => (S.profile && S.profile.prefKeys && S.profile.prefKeys[s.id] && s.keys.some(k => k.key === S.profile.prefKeys[s.id])) ? S.profile.prefKeys[s.id] : (s.keys[0] && s.keys[0].key);
+// tonalidade padrão da assinante no Piano (F, I ou M), guardada em prefKeys._voz
+const voz = () => (S.profile && S.profile.prefKeys && S.profile.prefKeys._voz) || "";
+const VOZ_NOME = { F: "Feminina", I: "Intermediária", M: "Masculina" };
+const keyOf = s => {
+  const pk = S.profile && S.profile.prefKeys;
+  if (pk && pk[s.id] && s.keys.some(k => k.key === pk[s.id])) return pk[s.id]; // tom escolhido nesta música
+  const v = voz(); const kv = v && s.keys.find(k => String(k.key).startsWith(v + "-"));
+  if (kv) return kv.key; // tom padrão da voz (Piano)
+  return s.keys[0] && s.keys[0].key;
+};
+function vozCard(inAccount) {
+  const v = voz();
+  if (!inAccount && (v || !S.songs.some(s => fmtOf(s) === "piano") || (() => { try { return localStorage.getItem("cp-voz-depois"); } catch (e) { return null; } })())) return "";
+  return `<div class="card" style="${inAccount ? "" : "border-color:var(--bronze)"}"><b>${inAccount ? "Tonalidade padrão no Piano" : "Em qual tonalidade você costuma cantar?"}</b>
+    <p class="small muted" style="margin:0">As músicas do Piano Playback vão abrir sempre nessa tonalidade. Em cada música você ainda pode trocar o tom.</p>
+    <div class="tabs" role="radiogroup">${["F", "I", "M"].map(x => `<button type="button" role="radio" aria-selected="${v === x}" data-a="setvoz" data-v="${x}">${VOZ_NOME[x]}</button>`).join("")}</div>
+    ${inAccount ? "" : `<button class="link small" data-a="vozdepois">Agora não</button>`}</div>`;
+}
 const keyData = (s, k) => s.keys.find(x => x.key === k) || s.keys[0];
 const getPl = id => S.playlists.find(p => p.id === id);
 // partituras de um tom (aceita o formato antigo, com uma só)
@@ -396,6 +413,7 @@ function viewCatalog() {
   const count = f => S.songs.filter(s => fmtOf(s) === f).length;
   let html = `<h1 class="title">Clube Playback <span style="font-size:.5em;font-weight:500;color:var(--bronze);white-space:nowrap">by Janaine Pavani</span></h1>
     <p class="muted small" style="margin:4px 0 0">${S.songs.length} músicas${S.saved.size ? "  ·  " + S.saved.size + " tons salvos no aparelho" : ""}</p>
+    ${vozCard(false)}
     <input class="search" id="q" type="search" placeholder="Buscar música" aria-label="Buscar música" value="${esc(S.query)}">
     ${S.songs.length ? `<div class="tabs" role="tablist" style="margin-top:10px">${[["all", "Todas", S.songs.length], ["trio", "Trio", count("trio")], ["piano", "Piano", count("piano")]].map(([v, l, n]) => `<button role="tab" aria-selected="${S.filter === v}" data-a="filter" data-f="${v}">${l} (${n})</button>`).join("")}</div>` : ""}`;
   html += untilBanner();
@@ -553,6 +571,7 @@ function viewAccount() {
       <p class="small muted" style="margin:0">${S.saved.size} ${S.saved.size === 1 ? "tom salvo" : "tons salvos"} neste aparelho.</p>
       <div class="hrow">${S.saved.size ? `<button class="btn sm" data-a="wipe">Apagar tudo do aparelho</button>` : ""}<button class="btn sm" data-a="logout">Sair</button></div>
     </div>
+    ${vozCard(true)}
     <button class="btn" data-a="welcome">Como usar o app</button>
     ${S.isAdmin || !S.sup.ready ? "" : `<button class="card" data-a="nav" data-v="support" style="text-align:left;cursor:pointer;color:inherit">
       <div class="hrow spread" style="width:100%"><b>Fale com a Janaine</b>${S.sup.unreadUser ? `<span class="pill warn">Resposta nova</span>` : ""}</div>
@@ -981,6 +1000,8 @@ document.addEventListener("click", async e => {
     else if (a === "open") { S.songId = el.dataset.id; S.view = "song"; S.tab = "video"; S.sheetIdx = 0; S.showKeys = false; S.addTo = false; mountedKey = null; render(); window.scrollTo(0, 0); }
     else if (a === "tab") { S.tab = el.dataset.t; render(); }
     else if (a === "showkeys") { S.showKeys = !S.showKeys; render(); }
+    else if (a === "setvoz") { const v = el.dataset.v; S.profile.prefKeys = { ...(S.profile.prefKeys || {}), _voz: v }; mountedKey = null; render(); updateDoc(doc(db, "users", S.user.uid), { prefKeys: S.profile.prefKeys }).catch(() => {}); toast("As músicas do Piano vão abrir na tonalidade " + VOZ_NOME[v].toLowerCase() + "."); }
+    else if (a === "vozdepois") { try { localStorage.setItem("cp-voz-depois", "1"); } catch (e) {} render(); }
     else if (a === "setkey") { const k = el.dataset.k; S.profile.prefKeys = { ...(S.profile.prefKeys || {}), [S.songId]: k }; S.showKeys = false; mountedKey = null; render(); updateDoc(doc(db, "users", S.user.uid), { prefKeys: S.profile.prefKeys }).catch(() => {}); toast("Tom " + k + " fixado para esta música."); }
     else if (a === "addto") { S.addTo = !S.addTo; render(); }
     else if (a === "warn3") { const em = el.dataset.em; const d = new Date(Date.now() + 1 * DAY); d.setHours(23, 59, 59, 0); await setDoc(doc(db, "allowed", em), { until: d }, { merge: true }); toast(em + " vai ver o aviso e o acesso termina em " + fmtDate(+d) + "."); S.adminData = null; render(); }
