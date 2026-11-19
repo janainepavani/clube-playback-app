@@ -798,7 +798,7 @@ function viewSongForm() {
       <label for="sLetra">Letra (PDF ou imagem)${f.letra ? "  ·  já enviada" : ""}</label><input class="field" id="sLetra" type="file" accept="application/pdf,image/*">
     </div>
     ${f.keys.map((k, i) => `<div class="card"><div class="hrow spread"><b>Tom ${i + 1}</b>${f.keys.length > 1 ? `<button class="link" type="button" data-a="rmkey" data-i="${i}">Tirar este tom</button>` : ""}</div>
-      <label for="k${i}">Tonalidade (ex.: Cm)</label><input class="field" id="k${i}" value="${esc(k.key)}" required>
+      <label for="k${i}">Tonalidade (ex.: ${(f.formacao || "trio") === "piano" ? "F-E, I-G, M-C" : "Cm"})</label><input class="field" id="k${i}" value="${esc(k.key)}" required>
       <label for="v${i}">Vídeo 720p (MP4)${k.video ? "  ·  já enviado" : ""}</label><input class="field" id="v${i}" type="file" accept="video/mp4">
       <b class="small">Partituras deste tom</b>
       ${sheetsOf(k).map((x, j) => `<div class="hrow"><input class="field" style="flex:1" id="sl${i}_${j}" value="${esc(x.label)}" aria-label="Nome da partitura"><button class="btn sm ghost" type="button" data-a="rmsheet" data-i="${i}" data-j="${j}">Tirar</button></div>`).join("") || `<p class="small muted" style="margin:0">Nenhuma ainda.</p>`}
@@ -830,6 +830,10 @@ async function submitSong() {
   readForm(); const f = adminForm;
   if (!f.name || f.keys.some(k => !k.key)) return toast("Preencha o nome e as tonalidades.");
   if (f.keys.some(k => !k.video && !k._v)) return toast("Cada tom precisa de um vídeo.");
+  if ((f.formacao || "trio") === "piano") {
+    f.keys.forEach(k => { k.key = k.key.replace(/^([fim])\s*-\s*/i, (_, g) => g.toUpperCase() + "-"); });
+    if (f.keys.some(k => !/^[FIM]-/.test(k.key))) return toast("No Piano, escreva F-, I- ou M- antes do tom (ex.: F-E, I-G, M-C).");
+  }
   const id = f.id || slug(f.name) + ((f.formacao || "trio") === "piano" ? "-piano" : "");
   if (!f.id && byId(id)) return toast("Já existe essa música em " + FMT[f.formacao || "trio"] + ".");
   const jobs = [];

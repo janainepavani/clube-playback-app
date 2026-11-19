@@ -17,7 +17,16 @@ const VIDEO_EXT = ["mp4", "m4v", "mov"], DOC_EXT = ["pdf", "jpg", "jpeg", "png",
 const TONE = /^([A-G])(#|b|♯|♭)?(m)?$/;
 const SPLIT = /[\s_\-.()[\],+&]+/;
 
+import { ACERVO_PIANO } from "./acervo.js";
 let C = null; // contexto vindo do app.js
+// No Piano, todo tom fica no padrão do app: F-E (Feminina), I-C (Intermediária), M-A (Masculina)
+const hasGen = t => /^[FIM]-/.test(String(t || ""));
+// tom sem F-/I-/M- numa música do Piano: descobre pelo acervo (ordem Feminina/Intermediária/Masculina)
+function genFromAcervo(song, tone) {
+  const a = ACERVO_PIANO.find(x => C.slug(x[0]) === C.slug(song)); if (!a) return "";
+  const tons = a[1].split("/").map(t => t.trim()); const hits = tons.map((t, i) => t.toLowerCase() === String(tone).toLowerCase() ? i : -1).filter(i => i >= 0);
+  return hits.length === 1 ? "FIM"[hits[0]] : "";
+}
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 
 const extOf = n => (n.split(".").pop() || "").toLowerCase();
@@ -206,6 +215,10 @@ export function openLote(ctx) {
   function applyExisting() {
     for (const g of S.groups) {
       const ex = findSong(g.name, g.fmt); g.exists = !!ex;
+      for (const it of S.items.filter(i => i.gid === g.gid && (i.type === "video" || i.type === "sheet") && i.tone)) {
+        if (g.fmt === "piano" && !hasGen(it.tone)) { const gg = genFromAcervo(g.name, it.tone); if (gg) it.tone = gg + "-" + it.tone; }
+        if (g.fmt === "trio" && hasGen(it.tone)) it.tone = it.tone.slice(2);
+      }
       for (const it of S.items.filter(i => i.gid === g.gid)) {
         if (it.auto) { it.type = it.auto.type; it.note = it.auto.note; delete it.auto; }
         if (!ex) continue;
@@ -219,10 +232,11 @@ export function openLote(ctx) {
       // ordem dos tons: começa pela ordem do catálogo, depois a dos arquivos
       const tones = [];
       (ex ? ex.keys.map(k => k.key) : []).forEach(t => tones.includes(t) || tones.push(t));
-      S.items.filter(i => i.gid === g.gid && i.type !== "skip" && i.type !== "letra" && i.tone).sort((a, b) => (GEN_RANK[a.g] ?? 9) - (GEN_RANK[b.g] ?? 9) || a.file.name.localeCompare(b.file.name)).forEach(i => {
+      S.items.filter(i => i.gid === g.gid && i.type !== "skip" && i.type !== "letra" && i.tone).sort((a, b) => (GEN_RANK[hasGen(a.tone) ? a.tone[0] : a.g] ?? 9) - (GEN_RANK[hasGen(b.tone) ? b.tone[0] : b.g] ?? 9) || a.file.name.localeCompare(b.file.name)).forEach(i => {
         const same = tones.find(t => keyEq(t, i.tone)); if (same) i.tone = same; else tones.push(i.tone);
       });
       g.order = g.order.filter(t => tones.includes(t)).concat(tones.filter(t => !g.order.includes(t)));
+      if (g.fmt === "piano" && g.order.every(hasGen)) g.order.sort((a, b) => GEN_RANK[a[0]] - GEN_RANK[b[0]]);
     }
     S.groups = S.groups.filter(g => S.items.some(i => i.gid === g.gid));
   }
@@ -233,6 +247,7 @@ export function openLote(ctx) {
     if (!its.length) return { ok: false, idle: true, text: "Nada para enviar" };
     const ex = findSong(g.name, g.fmt);
     if (its.some(i => (i.type === "video" || i.type === "sheet") && !i.tone)) return { ok: false, text: "Falta escolher o tom de algum arquivo" };
+    if (g.fmt === "piano" && its.some(i => (i.type === "video" || i.type === "sheet") && !hasGen(i.tone))) return { ok: false, text: "No Piano, escreva F-, I- ou M- antes do tom (ex.: F-E)" };
     const has = t => its.some(i => i.type === "video" && keyEq(i.tone, t)) || (ex && (ex.keys || []).some(k => keyEq(k.key, t) && k.video));
     const miss = g.order.filter(t => !has(t));
     if (miss.length) return { ok: false, text: "Falta o vídeo do tom " + miss.join(", ") };
