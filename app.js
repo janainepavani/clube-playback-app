@@ -762,7 +762,8 @@ function viewAdmin() {
       <details><summary class="small muted">Ver lista (${A.allowed.length})</summary><div class="list" style="margin-top:8px">${A.allowed.map(e => `<div class="row"><span class="name small">${esc(e)}<br><span class="small muted">Acesso até</span> <input type="date" class="field" style="padding:4px 8px;width:auto;display:inline-block" data-until-em="${esc(e)}" value="${A.until[e] ? new Date(A.until[e]).toISOString().slice(0, 10) : ""}" aria-label="Acesso até para ${esc(e)}"></span><button class="btn sm ghost" data-a="rmallowed" data-em="${esc(e)}">Remover</button></div>`).join("")}</div>
       <p class="small muted" style="margin:0">Data vazia = sem prazo (assinante do Trio). Com data, o app fecha sozinho para a pessoa depois desse dia e mostra o convite para passar para o Trio.</p></details>
     </div>
-    <div class="card"><div class="hrow spread"><b>Músicas</b><button class="btn sm primary" data-a="newsong">Nova música</button></div>
+    <div class="card"><div class="hrow spread"><b>Músicas</b><span class="hrow"><button class="btn sm" data-a="lote">Enviar uma pasta</button><button class="btn sm primary" data-a="newsong">Nova música</button></span></div>
+      <p class="small muted" style="margin:0">Enviar uma pasta: escolha a pasta com várias músicas (vídeos, letras e partituras) e o app cadastra tudo de uma vez.</p>
       <div class="list">${S.songs.map(s => `<div class="row"><span class="name">${esc(s.name)}  ${fmtPill(s)}<br><span class="small muted">${s.keys.map(k => esc(k.key)).join(" / ")}${s.bpm ? "  ·  BPM " + esc(s.bpm) : ""}</span></span><span class="meta"><button class="btn sm" data-a="editsong" data-id="${s.id}">Editar</button></span></div>`).join("") || `<p class="small muted" style="margin:0">Nenhuma música cadastrada.</p>`}</div>
     </div>
   </div>`;
@@ -1013,6 +1014,17 @@ document.addEventListener("click", async e => {
     else if (a === "revoke") { const em = el.dataset.em; await deleteDoc(doc(db, "allowed", em)).catch(() => {}); await updateDoc(doc(db, "users", el.dataset.uid), { status: "blocked" }); toast("Acesso retirado de " + em + ". O conteúdo salvo some na próxima conexão dela."); S.adminData = null; render(); }
     else if (a === "addemails") { const list = [...new Set(($("emails").value.match(/[^\s,;<>]+@[^\s,;<>]+\.[^\s,;<>]+/g) || []).map(x => x.toLowerCase()))]; if (!list.length) return toast("Nenhum e-mail encontrado no texto."); const uv = $("untilNew").value; const until = uv ? new Date(uv + "T23:59:59-03:00") : null; for (const em of list) await setDoc(doc(db, "allowed", em), { addedAt: serverTimestamp(), until }); toast(list.length + (list.length === 1 ? " e-mail adicionado" : " e-mails adicionados") + (until ? ", com acesso até " + fmtDate(+until) + "." : ", sem prazo.")); S.adminData = null; render(); }
     else if (a === "rmallowed") { await deleteDoc(doc(db, "allowed", el.dataset.em)); S.adminData = null; render(); }
+    else if (a === "lote") {
+      el.disabled = true;
+      try {
+        const mod = await import("./lote.js");
+        mod.openLote({
+          getSongs: () => S.songs, toast, esc, norm, slug, mb, sheetsOf, upload: (path, file, onProg) => upload(path, file, onProg),
+          saveSong: (id, data) => setDoc(doc(db, "songs", id), { ...data, updatedAt: serverTimestamp() })
+        });
+      } catch (err) { console.warn(err); toast("Não consegui abrir o envio de pasta."); }
+      finally { el.disabled = false; }
+    }
     else if (a === "newsong") { adminForm = { name: "", formacao: "trio", bpm: "", letra: null, keys: [{ key: "", video: null, sheets: [] }, { key: "", video: null, sheets: [] }] }; render(); window.scrollTo(0, 0); }
     else if (a === "editsong") { const s = byId(el.dataset.id); adminForm = JSON.parse(JSON.stringify({ id: s.id, name: s.name, formacao: fmtOf(s), bpm: s.bpm, letra: s.letra, keys: s.keys })); render(); window.scrollTo(0, 0); }
     else if (a === "rmsheet") { readForm(); adminForm.keys[+el.dataset.i].sheets.splice(+el.dataset.j, 1); render(); }
