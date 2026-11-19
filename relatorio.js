@@ -255,6 +255,11 @@ export function openRelatorio(ctx) {
         <button class="btn sm ${COUNT_LETRA ? "primary" : "ghost"}" data-r="letratoggle">${COUNT_LETRA ? "Letra conta como pendência (toque para tirar)" : "Letra não conta como pendência (toque para contar)"}</button>
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
       ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
+      ${(() => { let L; try { L = JSON.parse(lsGet("cp-last-left") || "null"); } catch (e) {} if (!L || (!L.songs.length && !L.files.length) || S.hideLeft) return "";
+        return `<div class="card" style="border-color:var(--bad)"><b style="color:var(--bad)">No último envio, isto não subiu</b>
+          ${L.songs.map(g => `<div class="small"><b>${C.esc(g.name)}</b>: ${C.esc(g.why)}</div>`).join("")}
+          ${L.files.map(f => `<div class="small">${C.esc(f.name)}: ${C.esc(f.file)} (${C.esc(f.why)})</div>`).join("")}
+          <button class="btn sm ghost" data-r="leftok">Já resolvi, tirar este aviso</button></div>`; })()}
       ${(() => { const n = Object.keys(PAD).length; const cnt1 = t => Object.values(PAD).filter(a => a.some(x => x.startsWith(t))).length;
         const lines = [["nome fora", "Nome fora do padrão"], ["tom do Piano", "Tom do Piano sem F-, I- ou M-"], ["tom do Trio", "Tom do Trio com F-, I- ou M-"], ["BPM com", "BPM com texto"], ["música repetida", "Música repetida"], ["não está", "Fora da lista do acervo"]];
         const trioIds = Object.entries(PAD).filter(([, a]) => a.some(x => x.startsWith("tom do Trio"))).map(([id]) => id);
@@ -321,6 +326,7 @@ export function openRelatorio(ctx) {
     else if (b.dataset.r === "genfix") genFix();
     else if (b.dataset.r === "bpmfill") bpmFill();
     else if (b.dataset.r === "namefix") nameFix();
+    else if (b.dataset.r === "leftok") { try { localStorage.removeItem("cp-last-left"); } catch (e) {} render(); }
     else if (b.dataset.r === "triofix") trioFix(b.dataset.ids.split(","));
     else if (b.dataset.r === "letratoggle") { COUNT_LETRA = !COUNT_LETRA; lsSet("cp-rel-letra", COUNT_LETRA ? "1" : "0"); render(); }
     else if (b.dataset.r === "addnew") {

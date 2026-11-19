@@ -315,6 +315,7 @@ export function openLote(ctx) {
         <div class="card"><b>${ready.length} de ${S.groups.length} ${S.groups.length === 1 ? "música pronta" : "músicas prontas"}  ·  ${nFiles.length} ${nFiles.length === 1 ? "arquivo" : "arquivos"}  ·  ${C.mb(size)}</b>
           <p class="small muted" style="margin:0">${skipped ? skipped + " arquivo" + (skipped > 1 ? "s ficam" : " fica") + " de fora (estão marcados como Ignorar, com o motivo). " : ""}Você pode mudar o nome, a formação, o tipo e o tom de qualquer arquivo. As músicas com aviso não são enviadas até resolver.</p>
           <div class="hrow small muted" style="flex-wrap:wrap;gap:6px">Mudar todas para: <button class="btn sm" data-l="allfmt" data-v="trio">Trio</button><button class="btn sm" data-l="allfmt" data-v="piano">Piano</button></div>
+          ${(() => { const nr = S.groups.filter(g => !status(g).ok && !status(g).idle); return nr.length ? `<div class="small" style="color:var(--bad);border:1px solid var(--bad);border-radius:10px;padding:8px 10px"><b>${nr.length} ${nr.length > 1 ? "músicas NÃO vão subir" : "música NÃO vai subir"} se você enviar agora:</b><br>${nr.map(g => C.esc(g.name) + ": " + C.esc(status(g).text)).join("<br>")}</div>` : ""; })()}
           <button class="btn primary" data-l="send" ${ready.length ? "" : "disabled"}>Enviar ${ready.length === 1 ? "1 música" : ready.length + " músicas"}</button>
           <button class="link" data-l="restart">Escolher outra pasta</button></div>
         ${S.groups.map(g => groupCard(g, fmtBtns)).join("")}`;
@@ -328,7 +329,12 @@ export function openLote(ctx) {
     }
     if (S.step === "done") {
       const bad = S.log.filter(l => !l.ok);
-      box.innerHTML = `<h1 class="title">${bad.length ? "Terminou, com " + bad.length + " erro" + (bad.length > 1 ? "s" : "") : "Tudo enviado"}</h1>
+      const left = (S.left || []), lf = (S.leftFiles || []);
+      const leftHtml = (left.length || lf.length) ? `<div class="card" style="border-color:var(--bad)"><b style="color:var(--bad)">Atenção: ${left.length ? left.length + (left.length > 1 ? " músicas não subiram" : " música não subiu") : ""}${left.length && lf.length ? " e " : ""}${lf.length ? lf.length + (lf.length > 1 ? " vídeos ficaram de fora" : " vídeo ficou de fora") : ""}</b>
+        ${left.map(g => `<div class="small"><b>${C.esc(g.name)}</b>: ${C.esc(g.why)}</div>`).join("")}
+        ${lf.map(f => `<div class="small">${C.esc(f.name)}: ${C.esc(f.file)} (${C.esc(f.why)})</div>`).join("")}
+        <p class="small muted" style="margin:0">Essa lista fica guardada no relatório até o próximo envio. Depois de corrigir, escolha a pasta de novo: o que já subiu fica de fora sozinho.</p></div>` : "";
+      box.innerHTML = `<h1 class="title">${bad.length || left.length ? "Terminou, mas nem tudo subiu" : "Tudo enviado"}</h1>${leftHtml}
         <p class="small muted" style="margin:0">Toque em Abrir para conferir e corrigir uma música. Ao salvar, você volta para a lista das últimas enviadas (fica guardada no relatório, em "Últimas enviadas", até o próximo envio).</p>
         <div class="list">${S.log.map(l => `<div class="row"><span class="name small">${C.esc(l.name)}  <span class="pill fmt-${l.fmt || "trio"}">${l.fmt === "piano" ? "Piano" : "Trio"}</span>${l.ok ? "" : `<br><span class="small" style="color:var(--bad)">${C.esc(l.err)}</span>`}</span><span class="meta">${l.ok ? `<button class="btn sm primary" data-l="open" data-id="${C.esc(l.id)}">Abrir</button>` : `<span class="pill bad">erro</span>`}</span></div>`).join("")}</div>
         ${bad.length ? `<p class="small muted" style="margin:0">Pode escolher a mesma pasta de novo: o que já foi enviado fica de fora sozinho.</p>` : ""}
@@ -363,6 +369,9 @@ export function openLote(ctx) {
 
   async function send() {
     const ready = S.groups.filter(g => status(g).ok);
+    S.left = S.groups.filter(g => !status(g).ok && !status(g).idle).map(g => ({ name: g.name, why: status(g).text, files: S.items.filter(i => i.gid === g.gid).map(i => i.file.name + (i.type === "skip" ? " (de fora: " + (i.note || "ignorado") + ")" : "")) }));
+    // vídeos de fora em músicas que subiram (ex.: 1080p, outro vídeo do mesmo tom)
+    S.leftFiles = S.items.filter(i => i.type === "skip" && VIDEO_EXT.includes(extOf(i.file.name)) && ready.some(g => g.gid === i.gid)).map(i => ({ name: S.groups.find(g => g.gid === i.gid).name, file: i.file.name, why: i.note || "ignorado" }));
     const work = ready.map(g => ({ g, its: S.items.filter(i => i.gid === g.gid && i.type !== "skip") }));
     const total = work.reduce((a, w) => a + w.its.reduce((b, i) => b + i.file.size, 0), 0) || 1; let done = 0;
     S.busy = true; S.step = "sending"; S.log = []; S.progress = 0; render();
@@ -400,7 +409,10 @@ export function openLote(ctx) {
     }
     try { if (wake) wake.release(); } catch (e) {}
     S.busy = false; S.step = "done";
-    try { localStorage.setItem("cp-last-sent", JSON.stringify(S.log.filter(l => l.ok).map(l => ({ id: l.id, name: l.name, fmt: l.fmt, at: Date.now() })))); } catch (e) {}
+    try {
+      localStorage.setItem("cp-last-sent", JSON.stringify(S.log.filter(l => l.ok).map(l => ({ id: l.id, name: l.name, fmt: l.fmt, at: Date.now() }))));
+      localStorage.setItem("cp-last-left", JSON.stringify({ at: Date.now(), songs: (S.left || []).concat(S.log.filter(l => !l.ok).map(l => ({ name: l.name, why: l.err }))), files: S.leftFiles || [] }));
+    } catch (e) {}
     render();
   }
 
