@@ -139,7 +139,7 @@ async function filesFromDrop(dt) {
 
 export function openLote(ctx) {
   C = ctx;
-  const S = { step: "pick", fmt: "trio", items: [], groups: [], busy: false, log: [], progress: 0, now: "" };
+  const S = { step: "pick", fmt: "", items: [], groups: [], busy: false, log: [], progress: 0, now: "" };
   const root = el("div", "st lote"); root.style.cssText = "position:fixed;inset:0;z-index:30;background:var(--ink);overflow:auto";
   const box = el("div", "stack"); box.style.cssText = "max-width:760px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 18px calc(60px + env(safe-area-inset-bottom))";
   root.appendChild(box); document.body.appendChild(root); document.body.style.overflow = "hidden";
@@ -284,11 +284,11 @@ export function openLote(ctx) {
           <ul class="small muted" style="margin:0;padding-left:18px"><li>a música, pelo nome da pasta (ou do arquivo, se estiverem soltos);</li><li>o tom, pelo nome do arquivo (ex.: <b>Andança D.mp4</b>, <b>Andança G Piano.pdf</b>);</li><li>vídeo (MP4), letra (PDF com "letra" no nome) e partituras (os outros PDFs).</li></ul>
           <p class="small muted" style="margin:0">Áudios e vídeos ainda em 1080p ficam de fora. Antes de enviar, você confere tudo.</p></div>
         <div class="card"><b class="small">Todas as músicas desta pasta são</b><div class="tabs" role="radiogroup">${fmtBtns(S.fmt, "data-fmt")}<button type="button" role="radio" aria-selected="${S.fmt === "auto"}" data-fmt="auto">Misturadas</button></div>
-          <p class="small muted" style="margin:0">${S.fmt === "auto" ? "Misturadas: o app decide por PP/TP ou Piano/Trio no nome do arquivo ou da pasta (sem nada, vira Trio)." : "Todas entram como " + (S.fmt === "piano" ? "Piano" : "Trio") + ", seja qual for o nome dos arquivos."}</p></div>
-        <div id="ldrop" class="card" style="border-style:dashed;align-items:center;text-align:center;padding:28px 16px">
+          <p class="small muted" style="margin:0">${!S.fmt ? "" : S.fmt === "auto" ? "Misturadas: o app decide por PP/TP ou Piano/Trio no nome do arquivo ou da pasta (sem nada, vira Trio)." : "Todas entram como " + (S.fmt === "piano" ? "Piano" : "Trio") + ", seja qual for o nome dos arquivos."}</p></div>
+        ${!S.fmt ? `<p class="small" style="margin:0;color:var(--warn)">Escolha primeiro se a pasta é Trio, Piano ou Misturada.</p>` : `<div id="ldrop" class="card" style="border-style:dashed;align-items:center;text-align:center;padding:28px 16px">
           ${canDir ? `<label class="btn primary" style="cursor:pointer">Escolher pasta<input id="ldir" type="file" webkitdirectory multiple hidden></label>` : ""}
           <label class="btn ${canDir ? "" : "primary"}" style="cursor:pointer">Escolher arquivos<input id="lfiles" type="file" multiple hidden accept="video/mp4,application/pdf,image/*"></label>
-          ${canDir ? `<p class="small muted" style="margin:0">ou arraste a pasta para cá</p>` : ""}</div>`;
+          ${canDir ? `<p class="small muted" style="margin:0">ou arraste a pasta para cá</p>` : ""}</div>`}`;
       return;
     }
     if (S.step === "reading") { box.innerHTML = `<h1 class="title">Lendo a pasta...</h1><p class="muted" id="lnow">${C.esc(S.now || "")}</p>`; return; }
@@ -424,7 +424,7 @@ export function openLote(ctx) {
   // arrastar a pasta (computador)
   root.addEventListener("dragover", e => { if (S.step === "pick") { e.preventDefault(); const z = box.querySelector("#ldrop"); if (z) z.style.borderColor = "var(--bronze)"; } });
   root.addEventListener("dragleave", () => { const z = box.querySelector("#ldrop"); if (z) z.style.borderColor = ""; });
-  root.addEventListener("drop", async e => { if (S.step !== "pick") return; e.preventDefault(); load(await filesFromDrop(e.dataTransfer)); });
+  root.addEventListener("drop", async e => { if (S.step !== "pick") return; if (!S.fmt) { e.preventDefault(); return C.toast("Escolha primeiro: Trio, Piano ou Misturadas."); } e.preventDefault(); load(await filesFromDrop(e.dataTransfer)); });
 
   render();
 }
