@@ -48,7 +48,7 @@ function build() {
     for (const [name, tons, bpm] of list) {
       const s = songs.find(x => !used.has(x.id) && (x.formacao === "piano" ? "piano" : "trio") === fmt && matchKey(x.name) === matchKey(name));
       if (s) used.add(s.id);
-      rows.push(row(fmt, name, tons.split("/").map(t => t.trim()).filter(t => t && t !== "—"), bpm, s));
+      rows.push(row(fmt, name, tons.split("/").map((t, i) => (t = t.trim()) && t !== "—" ? (fmt === "piano" ? "FIM"[i] + "-" + t : t) : "").filter(Boolean), bpm, s));
     }
   }
   for (const s of songs) if (!used.has(s.id)) rows.push(row(s.formacao === "piano" ? "piano" : "trio", s.name, [], "", s, true));
@@ -59,8 +59,8 @@ function row(fmt, name, tons, bpmAcervo, s, soApp) {
   if (!s) { r.falta.push("não está no app"); r.appKeys = []; r.letra = false; r.semPart = []; r.foraTons = tons; return r; }
   const keys = s.keys || [];
   r.appKeys = keys.map(k => k.key);
-  const has = new Set(keys.filter(k => k.video).map(k => toneKey(k.key)));
-  r.foraTons = tons.filter(t => !has.has(toneKey(t)));
+  const vk = keys.filter(k => k.video).map(k => k.key);
+  r.foraTons = tons.filter(t => !vk.some(k => sameKey(k, t)));
   r.letra = !!s.letra;
   r.semPart = fmt === "trio" ? keys.filter(k => !C.sheetsOf(k).length).map(k => k.key) : [];
   if (r.foraTons.length) r.falta.push("falta o tom " + r.foraTons.join(", "));
@@ -102,6 +102,32 @@ export function openRelatorio(ctx) {
     if (srcId !== id) { await C.deleteSong(srcId); local[srcId] = null; }
   }
   const wrongs = () => C.getSongs().filter(x => local[x.id] !== null && build().some(r => r.soApp && r.id === x.id));
+  // tons do Piano sem F-/I-/M- no app: completa pela ordem do acervo (Feminina/Intermediária/Masculina)
+  function genPlan() {
+    const out = [];
+    for (const x of C.getSongs()) {
+      if (local[x.id] === null || x.formacao !== "piano") continue;
+      const cur = local[x.id] || x; const a = listPiano().find(l => matchKey(l[0]) === matchKey(cur.name)); if (!a) continue;
+      const tons = a[1].split("/").map(t => t.trim());
+      let changed = false;
+      const keys = (cur.keys || []).map(k => {
+        if (/^[FIM]-/.test(k.key)) return k;
+        const hits = tons.map((t, i) => t.toLowerCase() === String(k.key).trim().toLowerCase() ? i : -1).filter(i => i >= 0);
+        if (hits.length !== 1) return k;
+        changed = true; return { ...k, key: "FIM"[hits[0]] + "-" + String(k.key).trim() };
+      });
+      if (changed) out.push({ x: cur, keys: keys.sort((p, q) => (GRANK[(p.key.match(/^([FIM])-/) || [])[1]] ?? 9) - (GRANK[(q.key.match(/^([FIM])-/) || [])[1]] ?? 9)) });
+    }
+    return out;
+  }
+  async function genFix() {
+    const plan = genPlan(); if (!plan.length) return;
+    if (!confirm("Colocar F-, I- ou M- nos tons destas músicas do Piano?\n\n" + plan.map(o => o.x.name + ": " + o.keys.map(k => k.key).join(", ")).join("\n"))) return;
+    S.busy = "Arrumando os tons..."; render();
+    try { for (const o of plan) { const d = { name: o.x.name, formacao: "piano", bpm: o.x.bpm || null, letra: o.x.letra || null, keys: o.keys.map(k => ({ key: k.key, video: k.video, sheets: C.sheetsOf(k) })) }; await C.saveSong(o.x.id, d); local[o.x.id] = { id: o.x.id, ...d }; } C.toast("Pronto: " + plan.length + (plan.length > 1 ? " músicas arrumadas." : " música arrumada.")); }
+    catch (e) { console.warn(e); C.toast("Parou com erro: " + (e.code || e.message)); }
+    S.busy = ""; render();
+  }
   async function autoFix() {
     const list = wrongs().map(x => ({ x, sg: suggest(x) })).filter(o => o.sg && !o.sg.cross);
     if (!list.length) return C.toast("Não achei nenhuma para juntar sozinha. Use Juntar em cada uma.");
@@ -132,6 +158,9 @@ export function openRelatorio(ctx) {
         <p class="small muted" style="margin:0">Completa = todos os tons com vídeo, letra, BPM e, no Trio, partitura em cada tom. No Piano a partitura não é cobrada.</p>
         <button class="btn primary" data-r="csv">Baixar planilha</button></div>
       ${S.busy ? `<div class="card"><b>${C.esc(S.busy)}</b></div>` : ""}
+      ${(() => { const n = genPlan().length; return n ? `<div class="card" style="border-color:var(--warn)"><b>${n} ${n > 1 ? "músicas do Piano estão" : "música do Piano está"} com tom sem F-, I- ou M-</b>
+        <p class="small muted" style="margin:0">Pela lista do acervo eu sei qual tom é o feminino, o intermediário e o masculino. Confere a lista e eu arrumo.</p>
+        <button class="btn primary" data-r="genfix">Colocar F-, I- e M- nos tons</button></div>` : ""; })()}
       ${(() => { const w = rows.filter(r => r.soApp); if (!w.length) return ""; const auto = w.filter(r => { const g = suggest(songNow(r.id) || { name: r.name }); return g && !g.cross; }).length;
         return `<div class="card" style="border-color:var(--warn)"><b>${w.length} ${w.length > 1 ? "músicas do app não estão" : "música do app não está"} na lista do acervo</b>
           <p class="small muted" style="margin:0">Em cada uma, me diga: se é música nova, toque em "Sim, é nova" e ela entra na lista. Se entrou com o nome errado, escolha a música certa e toque em Juntar (vídeos, letras e partituras passam para a certa e a errada some). Ou Apagar.</p>
@@ -178,6 +207,7 @@ export function openRelatorio(ctx) {
     else if (b.dataset.r === "open") { const st = { fmt: S.fmt, sit: S.sit, q: S.q, y: root.scrollTop }; close(); C.openSong(b.dataset.id, st); }
     else if (b.dataset.r === "new") { const st = { fmt: S.fmt, sit: S.sit, q: S.q, y: root.scrollTop }; close(); C.newSong(b.dataset.n, b.dataset.f, b.dataset.t ? b.dataset.t.split("/") : [], b.dataset.b, st); }
     else if (b.dataset.r === "autofix") autoFix();
+    else if (b.dataset.r === "genfix") genFix();
     else if (b.dataset.r === "addnew") {
       const x = songNow(b.dataset.id); if (!x) return;
       const fmt = x.formacao === "piano" ? "piano" : "trio";
